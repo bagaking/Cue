@@ -1,0 +1,83 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": ".bagakit/feature-tracker/features/f-223j2ezq3/proposal.md"
+  },
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-223j2ezq3/proposal.md",
+    "AGENTS.md",
+    "Sources/Cue/FloatingPanelController.swift",
+    "Sources/Cue/CueMain.swift",
+    "Sources/Cue/SidecarView.swift"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement the single-owner edge retract contract",
+      "objective": "Extend Cue's existing AppKit panel owner with a persistent Panel Pin, an explicit expanded/retracted state machine, hover hysteresis and multi-display-safe left/right geometry without changing item or content truth.",
+      "outcome": "An unpinned panel settles into a discoverable edge rail, reliably reveals on hover or explicit commands, preserves its expanded frame, and never confuses Panel Pin with item Pin or Always on Top.",
+      "acceptance": [
+        "Exactly one panel/window remains responsible for visibility, frame persistence, animation generations and edge transitions.",
+        "Panel Pin is a top-chrome persisted control; explicit show, shortcuts, drag and resize cancel stale retract work and leave the panel reachable.",
+        "Geometry handles true external-edge eligibility, shared display seams, non-primary displays, screen-parameter changes and existing size limits without saving a programmatic or retracted frame.",
+        "Reduce Motion, accessibility copy and timer cancellation are covered by deterministic owner-contract checks."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "Core and integration checks cover the state, geometry, setting and command-boundary contracts."
+        },
+        {
+          "kind": "artifact",
+          "ref": "Sources/Cue/PreviewRenderer.swift",
+          "proves": "The Panel Pin top-chrome states remain legible at supported compact sizes."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-223j2ezq3/proposal.md",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/SidecarView.swift",
+        "Sources/Cue/CueMain.swift"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "Adversarially qualify, package and restart the edge build",
+      "objective": "Challenge the delivered behavior on real macOS window surfaces, repair root causes, record deterministic and manual evidence, then commit, push, package and restart the exact signed build.",
+      "outcome": "The edge-resting build passes automated checks and runtime probes on ordinary, full-screen and multi-display layouts; origin/main and the running packaged process point to the closed-loop release.",
+      "acceptance": [
+        "No jitter, cursor-gap trap, shared-display seam escape, fully hidden panel, drag/resize fight, disconnected-display frame loss or semantic collision remains in adversarial review.",
+        "Warnings-as-errors, core, integration, Release render, package signing and Info.plist checks pass.",
+        "Manual probes cover edge hover, Panel Pin, explicit shortcut reveal, side-Dock or equivalent inset, full-screen Space, restart persistence and user-selected dimensions.",
+        "The feature commit is small and reversible, pushed to origin/main, and Cue is restarted from the newly packaged dist/Cue.app."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The full deterministic behavior suite remains green."
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/EXPERIMENTS.md",
+          "proves": "A human can repeat real edge, full-screen, multi-display, Pin and restart probes."
+        },
+        {
+          "kind": "owner_receipt",
+          "ref": ".bagakit/feature-tracker/features/f-223j2ezq3/owner-receipt.json",
+          "proves": "Canonical feature and task state is bound at delivery."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-223j2ezq3/proposal.md",
+        "AGENTS.md",
+        "scripts/check.sh",
+        "docs/EXPERIMENTS.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}

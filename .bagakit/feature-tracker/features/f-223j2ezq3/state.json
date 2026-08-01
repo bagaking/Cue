@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "feat_id": "f-223j2ezq3",
+  "title": "Cue Edge Retract and Panel Pin",
+  "slug": "cue-edge-retract-panel-pin",
+  "goal": "Make Cue visually disappear when idle without becoming hard to recover: add a distinct panel Pin, edge retract, hover reveal, bounded delay and multi-display-safe geometry; then package, restart, commit and push the stable build.",
+  "status": "ready",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "current_task_id": null,
+  "runtime_role": "standalone",
+  "blocked_reason_class": "none",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
+    }
+  ]
+}

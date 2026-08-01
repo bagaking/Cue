@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "generated_by": "bagakit-feature-tracker",
+  "features": [
+    {
+      "feat_id": "f-222j2ekp8",
+      "depends_on": [],
+      "dependents": [],
+      "layer": 0
+    },
+    {
+      "feat_id": "f-223j2ezq3",
+      "depends_on": [],
+      "dependents": [],
+      "layer": 0
+    }
+  ],
+  "layers": [
+    {
+      "layer": 0,
+      "feat_ids": [
+        "f-222j2ekp8",
+        "f-223j2ezq3"
+      ]
+    }
+  ],
+  "notes": []
+}

@@ -1,0 +1,22 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v1",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-222j2ekp8",
+  "semantic_revision": "7dc76b29d1cfc222f48cef4a8286cdd1f388aa9b4dcf797219554bde7f3a1077",
+  "lifecycle_status": "proposal",
+  "continuation": "blocked",
+  "current_item_id": null,
+  "blocker": {
+    "class": "workspace_unassigned",
+    "reason": "Feature has no assigned execution workspace."
+  },
+  "replacement_ref": null,
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features/f-222j2ekp8/state.json",
+    ".bagakit/feature-tracker/features/f-222j2ekp8/tasks.json"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features/f-222j2ekp8/state.json": "883d2a05b6193fc17abaccafcebf896a575eea023cb42a0a17a4dda163cd36ca",
+    ".bagakit/feature-tracker/features/f-222j2ekp8/tasks.json": "786d35ad34955773a563cfc09773acff962b830027366db2fe481aad5af8bf1f"
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md"
+  },
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+    "docs/PRODUCT.md",
+    "docs/EXPERIMENTS.md"
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Ground sync demand and settle the compatibility architecture",
+      "objective": "Collect attributable public user evidence across Copper and comparable capture/notes tools, then decide how `.cue`, per-item Markdown and optional `.cue.md` interoperability coexist without a second live truth.",
+      "outcome": "A reviewed architecture note in the feature proposal defines market-backed sync priorities, one authoritative compatibility direction, non-goals and transfer checks for CLI and iPhone consumers.",
+      "acceptance": [
+        "Evidence distinguishes direct user statements from product-owner claims and implementation inference.",
+        "The `.cue` and `.cue.md` decision preserves fine-grained package sync and gives a plain-language compatibility explanation.",
+        "Sync requirements cover conflicts, offline behavior, deletion, attachments, privacy and mobile capture before naming a provider fallback."
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+          "proves": "The architecture, boundaries and market-backed requirements are explicitly reviewed."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+        "docs/PRODUCT.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-002",
+      "title": "Implement the attachment source-of-truth contract",
+      "objective": "Add platform-neutral attachment metadata and content-addressed asset operations to the per-item package while preserving conflict, backup, tombstone and rebuildable-cache invariants.",
+      "outcome": "WorkItems round-trip image attachments, identical bytes deduplicate, missing assets fail visibly, and deletion removes assets only after the last live reference.",
+      "acceptance": [
+        "Attachment metadata contains stable identifiers, content hash, media type, byte size and package-relative path without AppKit types.",
+        "All attachment writes are verified and included in package fingerprints and backups.",
+        "Shared-asset deletion and tombstone behavior have deterministic tests."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "Core package tests cover attachment round-trip, deduplication, missing assets and deletion."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+        "Sources/Cue/WorkspacePackageCodec.swift",
+        "Sources/Cue/WorkspaceStore.swift"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-003",
+      "title": "Implement explicit native region and window capture",
+      "objective": "Use Apple-native capture surfaces to expose explicit Region and Window commands with visible Screen Recording permission outcomes and zero persistence on denial or cancellation.",
+      "outcome": "A successful command creates one attachment-backed WorkItem; cancellation, denial and capture failure create no asset and return actionable receipts.",
+      "acceptance": [
+        "No screenshot API runs without a direct user command.",
+        "Region and Window modes are separately invocable and permission denial persists zero content.",
+        "Capture is isolated behind one owner service and does not add clipboard or shell-command fallbacks."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "Integration checks cover success, cancellation, denial and storage failure outcomes."
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/EXPERIMENTS.md",
+          "proves": "A human can verify real Screen Recording permission and native selection behavior."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+        "docs/PRODUCT.md"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-004",
+      "title": "Ship attachment preview, Copy Image and Drag File interactions",
+      "objective": "Extend the compact item surface with a restrained image preview and accessible Copy Image, Drag File and attachment-removal actions without crowding text-only items.",
+      "outcome": "Image items remain scanable at every supported panel size and expose predictable pasteboard and file-promise behavior.",
+      "acceptance": [
+        "Text-only items retain their current density and interaction targets.",
+        "Image preview, Copy Image and Drag File operate from the stored package asset rather than duplicated temporary truth.",
+        "Keyboard, VoiceOver, missing-asset and minimum-size states are covered."
+      ],
+      "verification": [
+        {
+          "kind": "artifact",
+          "ref": "Sources/Cue/PreviewRenderer.swift",
+          "proves": "Release render scenarios cover image attachments at default and minimum panel sizes."
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/EXPERIMENTS.md",
+          "proves": "Copy Image and real drag into Finder/TextEdit can be verified outside offscreen rendering."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+        "Sources/Cue/WorkItemCard.swift",
+        "Sources/Cue/SidecarView.swift"
+      ],
+      "supersedes": []
+    },
+    {
+      "id": "T-005",
+      "title": "Run adversarial integration proof and deliver closed-loop commits",
+      "objective": "Audit privacy, lifecycle, package integrity, UI regressions and market-requirement traceability; repair root causes; package, restart, commit and push only closed slices.",
+      "outcome": "All automated gates pass, the signed Release app is restartable, residual manual checks are explicit, Feature Tracker evidence is current and origin/main contains small reviewable commits.",
+      "acceptance": [
+        "Warnings-as-errors, core, integration, package signing and Info.plist checks pass.",
+        "Adversarial review finds no passive capture, second source of truth, premature asset deletion or misleading sync claim.",
+        "Each commit has one rollback boundary and the tracker records gate and commit evidence before closeout."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The complete deterministic behavior suite passes."
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/EXPERIMENTS.md",
+          "proves": "Release permission, copy, drag and resize probes remain reviewable."
+        },
+        {
+          "kind": "owner_receipt",
+          "ref": ".bagakit/feature-tracker/features/f-222j2ekp8/owner-receipt.json",
+          "proves": "Canonical feature/task state and continuation evidence are bound at delivery."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+        "AGENTS.md",
+        "scripts/check.sh",
+        "docs/EXPERIMENTS.md"
+      ],
+      "supersedes": []
+    }
+  ]
+}

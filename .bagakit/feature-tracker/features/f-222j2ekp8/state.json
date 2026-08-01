@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "feat_id": "f-222j2ekp8",
+  "title": "Cue Screenshot Attachments and Sync Portability",
+  "slug": "cue-screenshot-sync-portability",
+  "goal": "Ship explicit region/window screenshot attachments with preview, Copy Image and Drag File while preserving one source of truth; ground sync requirements in real user evidence; define a non-confusing .cue and .cue.md compatibility contract; exclude OCR, passive capture and automatic upload.",
+  "status": "proposal",
+  "workspace_mode": "proposal_only",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "current_task_id": null,
+  "runtime_role": "standalone",
+  "blocked_reason_class": "none",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    }
+  ]
+}
