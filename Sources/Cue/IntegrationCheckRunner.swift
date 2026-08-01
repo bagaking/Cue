@@ -200,6 +200,59 @@ enum IntegrationCheckRunner {
         check({ if case .storageFailure = unavailableMapping { return true }; return false }(), "unavailable mapped workspace blocks capture")
         check(model.settings.activeWorkspaceID == alphaID && model.document?.items.count == alphaCount, "failed mapping never contaminates the current workspace")
 
+        var probePointer = NSPoint(x: -10_000, y: -10_000)
+        let panelProbe = FloatingPanelController(model: model, pointerLocationProvider: { probePointer })
+        if let expectedRail = panelProbe.runIntegrationRetractionProbe() {
+            let probeDeadline = Date().addingTimeInterval(1.4)
+            while Date() < probeDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            let actualRail = panelProbe.integrationPanelFrame
+            check(panelProbe.integrationPresentationState == .retracted(.right) || panelProbe.integrationPresentationState == .retracted(.left), "actual NSPanel remains retracted beyond a complete synthetic reveal/retract cycle")
+            check(abs(actualRail.width - expectedRail.width) < 0.5 && abs(actualRail.height - expectedRail.height) < 0.5, "actual retained-Sidecar NSPanel accepts the 22 by 88 rail frame")
+            check(abs(actualRail.minX - expectedRail.minX) < 0.5 && abs(actualRail.minY - expectedRail.minY) < 0.5, "actual NSPanel lands on the derived screen-edge target")
+            check(panelProbe.integrationPanelMinSize.width <= expectedRail.width && panelProbe.integrationContentMinSize.width <= expectedRail.width, "retracted NSPanel constraints no longer retain expanded minimum geometry")
+            probePointer = NSPoint(x: actualRail.midX, y: actualRail.midY)
+            panelProbe.runIntegrationPointerEntered(timestamp: ProcessInfo.processInfo.systemUptime + 0.001)
+            let revealDeadline = Date().addingTimeInterval(1.1)
+            while Date() < revealDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            let actualHover = panelProbe.integrationPanelFrame
+            check(panelProbe.integrationPresentationState == .expanded, "validated rail hover reveals exactly one stable expanded preview")
+            check(actualHover.intersects(actualRail), "actual hover preview preserves a continuous rail-to-content pointer path")
+            if actualRail.midX > actualHover.midX {
+                check(abs(actualHover.maxX - actualRail.maxX) < 0.5, "actual right-edge hover preview closes the outer strip gap")
+            } else {
+                check(abs(actualHover.minX - actualRail.minX) < 0.5, "actual left-edge hover preview closes the outer strip gap")
+            }
+        } else {
+            check(false, "actual NSPanel owner derives a rail target")
+        }
+        panelProbe.hide()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+
+        var animationEntryPointer = NSPoint(x: -10_000, y: -10_000)
+        let animationEntryProbe = FloatingPanelController(
+            model: model,
+            pointerLocationProvider: { animationEntryPointer }
+        )
+        if let expectedRail = animationEntryProbe.runIntegrationRetractionProbe() {
+            let generationBeforeEntry = animationEntryProbe.integrationPresentationGeneration
+            RunLoop.current.run(until: Date().addingTimeInterval(0.06))
+            animationEntryPointer = NSPoint(x: expectedRail.midX, y: expectedRail.midY)
+            let settleDeadline = Date().addingTimeInterval(1.1)
+            while Date() < settleDeadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+            check(animationEntryProbe.integrationPresentationState == .expanded, "real pointer entry during rail animation is replayed after settle")
+            check(animationEntryProbe.integrationPresentationGeneration == generationBeforeEntry + 1, "animation-period rail entry schedules exactly one hover reveal")
+            check(animationEntryProbe.integrationPanelFrame.intersects(expectedRail), "animation-period entry reveals the same gap-free hover target")
+        } else {
+            check(false, "animation-period entry probe derives a rail target")
+        }
+        animationEntryProbe.hide()
+
         print("\nCue integration checks: \(passed) passed, \(failed) failed")
         return failed == 0 ? 0 : 1
     }

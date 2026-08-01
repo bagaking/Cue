@@ -80,7 +80,7 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 2,
-      "status": "in_progress",
+      "status": "done",
       "gate_result": "pass",
       "last_gate_commands": [
         {
@@ -89,7 +89,7 @@
           "status": "pass"
         }
       ],
-      "last_commit_hash": null,
+      "last_commit_hash": "1e503c032add77bd5896a1cfa3afc8dd0c9372f7",
       "notes": []
     },
     {
@@ -128,9 +128,15 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "sh scripts/check.sh",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
       "last_commit_hash": null,
       "notes": []
     }

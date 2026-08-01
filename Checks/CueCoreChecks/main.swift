@@ -298,6 +298,23 @@ private func checkPanelPresentation() {
     check(machine.state == .expanded, "20 retract and reveal cycles finish without state drift")
 }
 
+private func checkPanelTrackingPolicy() {
+    check(!PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: true, actualPointerInside: true, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "tracking enter during programmatic animation is ignored")
+    check(!PanelTrackingPolicy.accepts(.exited, eventTimestamp: 10, fence: 10, isAnimating: false, actualPointerInside: false, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "queued tracking event at the settle fence is ignored")
+    check(!PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: true, actualPointerMovedSinceSettle: false, requiresPhysicalMotionEvidence: true), "window movement under a stationary pointer cannot manufacture rail entry")
+    check(!PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: true, actualPointerMovedSinceSettle: nil, requiresPhysicalMotionEvidence: true), "post-move rail entry fails closed when physical motion cannot be proved")
+    check(!PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: false, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "tracking enter contradicted by Quartz position is rejected")
+    check(!PanelTrackingPolicy.accepts(.exited, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: true, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "tracking exit contradicted by Quartz position is rejected")
+    check(PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: true, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "genuine post-fence tracking enter is accepted")
+    check(PanelTrackingPolicy.accepts(.exited, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: false, actualPointerMovedSinceSettle: true, requiresPhysicalMotionEvidence: true), "genuine post-fence tracking exit is accepted")
+    check(PanelTrackingPolicy.accepts(.entered, eventTimestamp: 20, fence: 10, isAnimating: false, actualPointerInside: nil, actualPointerMovedSinceSettle: nil, requiresPhysicalMotionEvidence: false), "native tracking remains usable before any programmatic frame settle")
+
+    let rail = CGRect(x: 100, y: 200, width: 22, height: 88)
+    check(!PanelTrackingPolicy.shouldReplayRailEntry(transitionStartPointer: CGPoint(x: 110, y: 220), settledPointer: CGPoint(x: 110, y: 220), railFrame: rail), "stationary cursor covered by a moving rail never replays entry")
+    check(PanelTrackingPolicy.shouldReplayRailEntry(transitionStartPointer: CGPoint(x: 20, y: 20), settledPointer: CGPoint(x: 110, y: 220), railFrame: rail), "real movement into the rail during animation replays entry once at settle")
+    check(!PanelTrackingPolicy.shouldReplayRailEntry(transitionStartPointer: CGPoint(x: 20, y: 20), settledPointer: CGPoint(x: 90, y: 220), railFrame: rail), "animation-period motion outside the final rail does not replay entry")
+}
+
 private func checkPanelGeometry() {
     let left = PanelScreenGeometry(
         id: "left",
@@ -353,8 +370,63 @@ private func checkPanelGeometry() {
     check(stableRepair == stable, "deriving a rail leaves canonical expanded size and position unchanged")
     check((0..<20).allSatisfy { _ in PanelGeometryPolicy.railPlacement(for: stable, screens: [main])?.frame == stableRail }, "20 geometry derivations are deterministic and drift-free")
 
+    let runtimeCanonical = CGRect(x: 1649, y: 87, width: 399, height: 592)
+    let runtimeRail = PanelRailPlacement(
+        edge: .right,
+        frame: CGRect(x: 2034, y: 339, width: 22, height: 88),
+        screenID: "main",
+        isPhysicalOuterEdge: true
+    )
+    let rightHover = PanelGeometryPolicy.hoverExpandedFrame(canonicalExpandedFrame: runtimeCanonical, railPlacement: runtimeRail)
+    check(rightHover.maxX == runtimeRail.frame.maxX, "right-edge hover preview closes the observed 8-point rail gap")
+    check(rightHover.intersects(runtimeRail.frame), "right-edge rail and hover preview form one continuous pointer target")
+    check(runtimeCanonical.maxX == 2048, "deriving a hover bridge leaves canonical expanded geometry unchanged")
+
+    let leftCanonical = CGRect(x: -1432, y: 100, width: 400, height: 600)
+    let leftRail = PanelRailPlacement(edge: .left, frame: CGRect(x: -1440, y: 356, width: 22, height: 88), screenID: "left", isPhysicalOuterEdge: true)
+    let leftHover = PanelGeometryPolicy.hoverExpandedFrame(canonicalExpandedFrame: leftCanonical, railPlacement: leftRail)
+    check(leftHover.minX == leftRail.frame.minX && leftHover.intersects(leftRail.frame), "negative-origin left-edge hover preview remains gap-free")
+
     let tiny = PanelScreenGeometry(id: "tiny", frame: CGRect(x: 0, y: 0, width: 30, height: 40), visibleFrame: CGRect(x: 0, y: 0, width: 30, height: 40))
     check(PanelGeometryPolicy.railPlacement(for: stable, screens: [tiny]) == nil, "no usable rail geometry safely keeps Cue expanded")
+}
+
+private func checkPanelEngagementPolicy() {
+    let idleKeyPanel = PanelEngagementSnapshot(
+        panelPinned: false,
+        pointerInside: false,
+        isKeyWindow: true,
+        isTextEditing: false
+    )
+    check(PanelEngagementPolicy.allowsAutoRetraction(idleKeyPanel), "an idle nonactivating key panel may retract")
+
+    var editing = idleKeyPanel
+    editing.isTextEditing = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(editing), "actual text editing suppresses retraction")
+
+    var notKeyButEditing = editing
+    notKeyButEditing.isKeyWindow = false
+    check(!PanelEngagementPolicy.allowsAutoRetraction(notKeyButEditing), "editing protection does not depend on the unreliable key flag")
+
+    var mouseDrag = idleKeyPanel
+    mouseDrag.mouseButtonDown = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(mouseDrag), "mouse-down or drag suppresses retraction")
+
+    var menu = idleKeyPanel
+    menu.isMenuTracking = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(menu), "menu tracking suppresses retraction")
+
+    var sheet = idleKeyPanel
+    sheet.hasAttachedSheet = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(sheet), "an attached sheet suppresses retraction")
+
+    var modal = idleKeyPanel
+    modal.hasModalWindow = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(modal), "a modal window suppresses retraction")
+
+    var pinned = idleKeyPanel
+    pinned.panelPinned = true
+    check(!PanelEngagementPolicy.allowsAutoRetraction(pinned), "Panel Pin remains the explicit persistent hold")
 }
 
 private func checkPanelSettings() {
@@ -399,7 +471,9 @@ checkMarkdown()
 checkStorage()
 checkDuplicatePolicy()
 checkPanelPresentation()
+checkPanelTrackingPolicy()
 checkPanelGeometry()
+checkPanelEngagementPolicy()
 checkPanelSettings()
 
 print("\nCue core checks: \(passed) passed, \(failed) failed")

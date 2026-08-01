@@ -10,18 +10,18 @@
   "branch": "",
   "worktree_name": "",
   "worktree_path": "",
-  "current_task_id": "T-001",
+  "current_task_id": "T-002",
   "runtime_role": "standalone",
   "blocked_reason_class": "none",
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 2,
-    "round_count": 2
+    "no_progress_rounds": 1,
+    "round_count": 3
   },
   "gate": {
     "last_result": "pass",
-    "last_task_id": "T-001",
+    "last_task_id": "T-002",
     "last_check_commands": [
       {
         "command": "sh scripts/check.sh",
@@ -29,7 +29,7 @@
         "status": "pass"
       }
     ],
-    "last_log_path": ".bagakit/feature-tracker/features/f-223j2ezq3/artifacts/gate-T-001-r2-0001.log"
+    "last_log_path": ".bagakit/feature-tracker/features/f-223j2ezq3/artifacts/gate-T-002-r3-0001.log"
   },
   "history": [
     {
@@ -59,6 +59,18 @@
     {
       "action": "task_gate",
       "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-002"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-002 => pass"
     }
   ]
 }

@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+private func currentAppKitPointerLocation() -> NSPoint? {
+    guard let quartzPoint = CGEvent(source: nil)?.location,
+          let primaryScreen = NSScreen.screens.first else { return nil }
+    return NSPoint(x: quartzPoint.x, y: primaryScreen.frame.maxY - quartzPoint.y)
+}
+
 extension Notification.Name {
     static let cueModalInteractionEnded = Notification.Name("CueModalInteractionEnded")
 }
@@ -18,7 +24,8 @@ extension NSSavePanel {
 final class CuePanel: NSPanel {
     var onRequestHide: (() -> Void)?
     var onExplicitInteraction: (() -> Void)?
-    var onMouseButtonState: ((Bool) -> Void)?
+    var onMouseButtonState: ((Bool, NSView?) -> Void)?
+    var onTextInputActivity: (() -> Void)?
     var isRetracted = false
 
     override var canBecomeKey: Bool { !isRetracted }
@@ -39,20 +46,32 @@ final class CuePanel: NSPanel {
                 onExplicitInteraction?()
                 return
             }
-            onMouseButtonState?(true)
-            if !isKeyWindow { onExplicitInteraction?() }
+            onExplicitInteraction?()
+            onMouseButtonState?(true, editableTextTarget(at: event.locationInWindow))
         case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            onMouseButtonState?(false)
+            onMouseButtonState?(false, editableTextTarget(at: event.locationInWindow))
+        case .keyDown:
+            onTextInputActivity?()
         default:
             break
         }
         super.sendEvent(event)
     }
+
+    private func editableTextTarget(at point: NSPoint) -> NSView? {
+        var candidate = contentView?.hitTest(point)
+        while let view = candidate {
+            if let textView = view as? NSTextView, textView.isEditable { return textView }
+            if let textField = view as? NSTextField, textField.isEditable { return textField }
+            candidate = view.superview
+        }
+        return nil
+    }
 }
 
 final class PanelTrackingHostingView: NSHostingView<PanelRootView> {
-    var onPointerEntered: (() -> Void)?
-    var onPointerExited: (() -> Void)?
+    var onPointerEntered: ((NSEvent) -> Void)?
+    var onPointerExited: ((NSEvent) -> Void)?
     private var activeTrackingArea: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -68,8 +87,8 @@ final class PanelTrackingHostingView: NSHostingView<PanelRootView> {
         super.updateTrackingAreas()
     }
 
-    override func mouseEntered(with event: NSEvent) { onPointerEntered?() }
-    override func mouseExited(with event: NSEvent) { onPointerExited?() }
+    override func mouseEntered(with event: NSEvent) { onPointerEntered?(event) }
+    override func mouseExited(with event: NSEvent) { onPointerExited?(event) }
 }
 
 /// The sole owner of CuePanel visibility, frame and presentation state.
@@ -77,6 +96,21 @@ final class PanelTrackingHostingView: NSHostingView<PanelRootView> {
 /// global pointer monitor or second persisted placement is involved.
 @MainActor
 final class FloatingPanelController: NSObject, NSWindowDelegate {
+    private struct ActiveFrameAnimation {
+        var startFrame: NSRect
+        var targetFrame: NSRect
+        var startedAt: TimeInterval
+        var duration: TimeInterval
+        var presentationToken: Int
+        var animationToken: Int
+        var completion: () -> Void
+    }
+
+    private struct FramePointerBaseline {
+        var animationToken: Int
+        var location: NSPoint?
+    }
+
     private static let initialSize = NSSize(width: 372, height: 600)
     private static let hoverRevealDelay = 0.14
     private static let retractDelay = 0.68
@@ -89,13 +123,29 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private var pendingWorkItem: DispatchWorkItem?
     private var isAnimating = false
     private var animationGeneration = 0
+    private var frameAnimationTimer: Timer?
+    private var activeFrameAnimation: ActiveFrameAnimation?
     private var pointerInside = false
     private var mouseButtonDown = false
+    private var isMenuTracking = false
+    private var isTextEditing = false
+    private weak var activeTextEditor: NSView?
     private var configuredFloating = true
     private var lastRevealReason: PanelRevealReason = .explicit
     private var focusComposerAfterReveal = false
+    private var composerFocusGeneration = 0
+    private let panelTraceEnabled = ProcessInfo.processInfo.environment["CUE_PANEL_TRACE"] == "1"
+    private let pointerLocationProvider: () -> NSPoint?
+    private var trackingEventFence: TimeInterval = 0
+    private var frameSettlePointerLocation: NSPoint?
+    private var requiresPhysicalMotionAfterFrameSettle = false
+    private var frameTransitionPointerBaseline: FramePointerBaseline?
 
-    init(model: AppModel) {
+    init(
+        model: AppModel,
+        pointerLocationProvider: @escaping () -> NSPoint? = currentAppKitPointerLocation
+    ) {
+        self.pointerLocationProvider = pointerLocationProvider
         panel = CuePanel(
             contentRect: NSRect(origin: .zero, size: Self.initialSize),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable, .closable],
@@ -127,15 +177,18 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         let root = PanelRootView(model: model, chrome: chrome)
         let hosting = PanelTrackingHostingView(rootView: root)
         hosting.sizingOptions = []
-        hosting.onPointerEntered = { [weak self] in self?.pointerEntered() }
-        hosting.onPointerExited = { [weak self] in self?.pointerExited() }
+        hosting.onPointerEntered = { [weak self] event in self?.pointerEntered(event) }
+        hosting.onPointerExited = { [weak self] event in self?.pointerExited(event) }
         panel.contentView = hosting
 
         expandedFrame = restoredOrDefaultFrame()
         panel.setFrame(expandedFrame, display: false)
         panel.onRequestHide = { [weak self] in self?.hide() }
-        panel.onExplicitInteraction = { [weak self] in self?.show() }
-        panel.onMouseButtonState = { [weak self] down in self?.mouseButtonChanged(down) }
+        panel.onExplicitInteraction = { [weak self] in self?.handleExplicitMouseInteraction() }
+        panel.onMouseButtonState = { [weak self] down, editableTextTarget in
+            self?.mouseButtonChanged(down, editableTextTarget: editableTextTarget)
+        }
+        panel.onTextInputActivity = { [weak self] in self?.textInputActivity() }
         chrome.onExplicitReveal = { [weak self] in self?.show() }
 
         _ = process(.setPinned(model.settings.panelPinned))
@@ -143,6 +196,12 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             self,
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(interactionBegan),
+            name: NSMenu.didBeginTrackingNotification,
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -163,28 +222,53 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             name: .cueModalInteractionEnded,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textEditingBegan),
+            name: NSText.didBeginEditingNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textEditingEnded),
+            name: NSText.didEndEditingNotification,
+            object: nil
+        )
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(frontmostApplicationChanged),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
     }
 
     deinit {
         pendingWorkItem?.cancel()
+        frameAnimationTimer?.invalidate()
         NotificationCenter.default.removeObserver(self)
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
     var isVisible: Bool { machine.state != .hidden }
 
     func toggle(focusComposer: Bool = false) {
+        invalidateComposerFocusRequest()
         focusComposerAfterReveal = focusComposer
         _ = process(.toggle)
     }
 
     func show(focusComposer: Bool = false) {
+        invalidateComposerFocusRequest()
         focusComposerAfterReveal = focusComposer
         _ = process(.show(reason: .explicit))
     }
 
     func hide() {
+        invalidateComposerFocusRequest()
         focusComposerAfterReveal = false
         mouseButtonDown = false
+        isMenuTracking = false
+        clearTextEditingHold()
         _ = process(.hide)
     }
 
@@ -212,7 +296,22 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             // transition size constraints or isAnimating latched.
             presentExpanded(reason: hoverNeedsLevelNormalization ? .pin : lastRevealReason)
         } else if !pinned, !isAnimating {
-            reconcilePointerAfterMovement()
+            rearmFromTrackedPointerState()
+        }
+    }
+
+    private func handleExplicitMouseInteraction() {
+        switch machine.state {
+        case .hidden, .retracted:
+            show()
+        case .expanded where lastRevealReason == .hover:
+            // Promote a hover preview before AppKit dispatches the click. This
+            // restores the configured level/key intent without restarting an
+            // already explicit panel on every ordinary mouse-down.
+            show()
+            panel.makeKey()
+        case .expanded:
+            break
         }
     }
 
@@ -223,10 +322,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     func windowDidBecomeKey(_ notification: Notification) {
         cancelPendingWork()
+        guard !focusComposerAfterReveal else { return }
+        rearmFromTrackedPointerState()
     }
 
     func windowDidResignKey(_ notification: Notification) {
-        reconcilePointerAfterMovement()
+        invalidateComposerFocusRequest()
+        clearTextEditingHold()
+        rearmFromTrackedPointerState()
     }
 
     func windowWillMove(_ notification: Notification) {
@@ -243,16 +346,18 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     func windowDidEndLiveResize(_ notification: Notification) {
         saveExpandedFrameIfUserDriven()
-        reconcilePointerAfterMovement()
+        rearmFromTrackedPointerState()
     }
 
     @discardableResult
     private func process(_ event: PanelPresentationEvent) -> [PanelPresentationEffect] {
+        trace("event=\(String(describing: event)) before=\(String(describing: machine.state)) frame=\(NSStringFromRect(panel.frame))")
         let effects = machine.handle(event)
         // A rail hides immediately rather than briefly exposing the retained
         // 352pt Sidecar subtree inside a 22pt window during a fade-out.
         if machine.state != .hidden || !panel.isRetracted { chrome.state = machine.state }
         for effect in effects { apply(effect) }
+        trace("event=\(String(describing: event)) after=\(String(describing: machine.state)) effects=\(String(describing: effects)) frame=\(NSStringFromRect(panel.frame))")
         return effects
     }
 
@@ -280,6 +385,15 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private func presentExpanded(reason: PanelRevealReason) {
         let token = machine.generation
         lastRevealReason = reason
+        let railPlacement = pendingRailPlacement
+        let targetFrame = reason == .hover
+            ? railPlacement.map {
+                PanelGeometryPolicy.hoverExpandedFrame(
+                    canonicalExpandedFrame: expandedFrame,
+                    railPlacement: $0
+                )
+            } ?? expandedFrame
+            : expandedFrame
         pendingRailPlacement = nil
         preparePanelForTransition()
         panel.isRetracted = false
@@ -287,11 +401,11 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         panel.alphaValue = 1
         panel.orderFrontRegardless()
 
-        transitionFrame(to: expandedFrame, duration: 0.16, token: token) { [weak self] in
+        transitionFrame(to: targetFrame, duration: 0.16, token: token) { [weak self] in
             guard let self, self.machine.state == .expanded else { return }
             self.configureExpandedPanel()
-            self.finishExplicitFocusIfNeeded(reason: reason)
-            self.reconcilePointerAfterMovement()
+            let waitingForComposerFocus = self.finishExplicitFocusIfNeeded(reason: reason)
+            if !waitingForComposerFocus { self.settlePointerAfterProgrammaticFrame() }
         }
     }
 
@@ -307,7 +421,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         transitionFrame(to: placement.frame, duration: 0.17, token: token) { [weak self] in
             guard let self, case .retracted = self.machine.state else { return }
             self.configureRetractedPanel()
-            self.reconcilePointerAfterMovement()
+            self.settlePointerAfterProgrammaticFrame()
         }
     }
 
@@ -343,17 +457,30 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func finishExplicitFocusIfNeeded(reason: PanelRevealReason) {
-        guard reason.allowsFocus else { return }
+    private func finishExplicitFocusIfNeeded(reason: PanelRevealReason) -> Bool {
+        guard reason.allowsFocus else { return false }
+        if focusComposerAfterReveal { NSApp.activate() }
         panel.makeKey()
         if focusComposerAfterReveal {
             focusComposerAfterReveal = false
-            let token = machine.generation
+            let focusToken = animationGeneration
+            composerFocusGeneration &+= 1
+            let composerToken = composerFocusGeneration
             DispatchQueue.main.async { [weak self] in
-                guard let self, token == self.machine.generation, self.machine.state == .expanded else { return }
+                guard let self,
+                      focusToken == self.animationGeneration,
+                      composerToken == self.composerFocusGeneration,
+                      self.machine.state == .expanded,
+                      self.panel.isKeyWindow,
+                      NSApp.isActive else { return }
                 NotificationCenter.default.post(name: .cueFocusComposer, object: nil)
+                if !self.captureTextEditingHoldFromResponder(matching: nil) {
+                    self.settlePointerAfterProgrammaticFrame()
+                }
             }
+            return true
         }
+        return false
     }
 
     private func transitionFrame(
@@ -362,72 +489,176 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         token: Int,
         completion: @escaping () -> Void
     ) {
+        trace("frame-transition start target=\(NSStringFromRect(target)) actual=\(NSStringFromRect(panel.frame))")
         interruptPhysicalAnimation()
         animationGeneration &+= 1
         let animationToken = animationGeneration
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || panel.frame.equalTo(target) {
+        frameTransitionPointerBaseline = FramePointerBaseline(
+            animationToken: animationToken,
+            location: pointerLocationProvider()
+        )
+        if duration <= 0 || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || panel.frame.equalTo(target) {
             isAnimating = true
             panel.setFrame(target, display: true)
+            trackingEventFence = ProcessInfo.processInfo.systemUptime
             isAnimating = false
+            trace("frame-transition immediate target=\(NSStringFromRect(target)) actual=\(NSStringFromRect(panel.frame))")
             completion()
             return
         }
         isAnimating = true
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = duration
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            panel.animator().setFrame(target, display: true)
-        } completionHandler: { [weak self] in
-            DispatchQueue.main.async {
-                guard let self,
-                      token == self.machine.generation,
-                      animationToken == self.animationGeneration else { return }
-                self.panel.setFrame(target, display: true)
-                self.isAnimating = false
-                completion()
+        activeFrameAnimation = ActiveFrameAnimation(
+            startFrame: panel.frame,
+            targetFrame: target,
+            startedAt: ProcessInfo.processInfo.systemUptime,
+            duration: duration,
+            presentationToken: token,
+            animationToken: animationToken,
+            completion: completion
+        )
+        let timer = Timer(
+            timeInterval: 1.0 / 60.0,
+            target: self,
+            selector: #selector(frameAnimationTick),
+            userInfo: nil,
+            repeats: true
+        )
+        frameAnimationTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func frameAnimationTick(_ timer: Timer) {
+        guard frameAnimationTimer === timer else {
+            timer.invalidate()
+            return
+        }
+        guard let animation = activeFrameAnimation,
+              animation.presentationToken == machine.generation,
+              animation.animationToken == animationGeneration else {
+            timer.invalidate()
+            frameAnimationTimer = nil
+            activeFrameAnimation = nil
+            isAnimating = false
+            return
+        }
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - animation.startedAt
+        let progress = min(max(elapsed / animation.duration, 0), 1)
+        let eased = progress * progress * (3 - 2 * progress)
+        let frame = interpolate(from: animation.startFrame, to: animation.targetFrame, progress: eased)
+        panel.setFrame(frame, display: true)
+
+        guard progress >= 1 else { return }
+        timer.invalidate()
+        if frameAnimationTimer === timer { frameAnimationTimer = nil }
+        activeFrameAnimation = nil
+        panel.setFrame(animation.targetFrame, display: true)
+        trackingEventFence = ProcessInfo.processInfo.systemUptime
+        isAnimating = false
+        trace("frame-transition complete target=\(NSStringFromRect(animation.targetFrame)) actual=\(NSStringFromRect(panel.frame))")
+        animation.completion()
+    }
+
+    private func interpolate(from start: NSRect, to target: NSRect, progress: Double) -> NSRect {
+        func value(_ lhs: CGFloat, _ rhs: CGFloat) -> CGFloat {
+            lhs + (rhs - lhs) * CGFloat(progress)
+        }
+        return NSRect(
+            x: value(start.minX, target.minX),
+            y: value(start.minY, target.minY),
+            width: value(start.width, target.width),
+            height: value(start.height, target.height)
+        )
+    }
+
+    private func pointerEntered(_ event: NSEvent) {
+        acceptTrackingEvent(.entered, timestamp: event.timestamp)
+    }
+
+    private func pointerExited(_ event: NSEvent) {
+        acceptTrackingEvent(.exited, timestamp: event.timestamp)
+    }
+
+    private func acceptTrackingEvent(_ kind: PanelTrackingEventKind, timestamp: TimeInterval) {
+        let actualPoint = pointerLocationProvider()
+        let actualInside = actualPoint.map(panel.frame.contains)
+        let actualMoved = actualPoint.flatMap { point in
+            frameSettlePointerLocation.map { baseline in
+                abs(point.x - baseline.x) > 0.5 || abs(point.y - baseline.y) > 0.5
             }
+        }
+        guard PanelTrackingPolicy.accepts(
+            kind,
+            eventTimestamp: timestamp,
+            fence: trackingEventFence,
+            isAnimating: isAnimating,
+            actualPointerInside: actualInside,
+            actualPointerMovedSinceSettle: actualMoved,
+            requiresPhysicalMotionEvidence: requiresPhysicalMotionAfterFrameSettle
+        ) else {
+            trace("tracking-\(String(describing: kind)) ignored timestamp=\(timestamp) fence=\(trackingEventFence) actualInside=\(String(describing: actualInside)) actualMoved=\(String(describing: actualMoved))")
+            return
+        }
+        frameSettlePointerLocation = actualPoint
+        requiresPhysicalMotionAfterFrameSettle = false
+        switch kind {
+        case .entered:
+            pointerInside = true
+            _ = process(.hoverEntered)
+        case .exited:
+            pointerInside = false
+            _ = process(.hoverExited)
         }
     }
 
-    private func pointerEntered() {
-        pointerInside = true
-        guard !isAnimating else { return }
-        _ = process(.hoverEntered)
-    }
-
-    private func pointerExited() {
-        pointerInside = false
-        guard !isAnimating else { return }
-        _ = process(.hoverExited)
-    }
-
-    private func mouseButtonChanged(_ down: Bool) {
+    private func mouseButtonChanged(_ down: Bool, editableTextTarget: NSView?) {
         mouseButtonDown = down
         if down {
+            if editableTextTarget != nil {
+                NSApp.activate()
+                panel.makeKey()
+            } else {
+                clearTextEditingHold()
+            }
             cancelPendingWork()
         } else {
-            reconcilePointerAfterMovement()
+            if editableTextTarget != nil,
+               captureTextEditingHoldFromResponder(matching: editableTextTarget) {
+                return
+            }
+            rearmFromTrackedPointerState()
         }
     }
 
     private func retractionDeadline(token: Int) {
         guard token == machine.generation, machine.state == .expanded else { return }
+        trace("retract-deadline token=\(token) engagement=\(String(describing: engagementSnapshot))")
         guard canAutoRetract else {
+            trace("retract-deadline suppressed")
             return
         }
         let placement = PanelGeometryPolicy.railPlacement(for: expandedFrame, screens: screenGeometries)
+        trace("retract-deadline placement=\(String(describing: placement))")
         pendingRailPlacement = placement
         _ = process(.retractDeadline(token: token, edge: placement?.edge))
     }
 
     private var canAutoRetract: Bool {
-        !machine.isPinned &&
-            !pointerInside &&
-            !panel.isKeyWindow &&
-            !panel.inLiveResize &&
-            panel.attachedSheet == nil &&
-            NSApp.modalWindow == nil &&
-            !mouseButtonDown
+        PanelEngagementPolicy.allowsAutoRetraction(engagementSnapshot)
+    }
+
+    private var engagementSnapshot: PanelEngagementSnapshot {
+        PanelEngagementSnapshot(
+            panelPinned: machine.isPinned,
+            pointerInside: pointerInside,
+            isKeyWindow: panel.isKeyWindow,
+            isTextEditing: isTextEditing,
+            mouseButtonDown: mouseButtonDown,
+            isMenuTracking: isMenuTracking,
+            isLiveResizing: panel.inLiveResize,
+            hasAttachedSheet: panel.attachedSheet != nil,
+            hasModalWindow: NSApp.modalWindow != nil
+        )
     }
 
     private func schedule(after delay: TimeInterval, action: @escaping () -> Void) {
@@ -444,6 +675,9 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     private func interruptPhysicalAnimation() {
         guard isAnimating else { return }
+        frameAnimationTimer?.invalidate()
+        frameAnimationTimer = nil
+        activeFrameAnimation = nil
         animationGeneration &+= 1
         // A direct assignment retargets AppKit's frame/alpha animators. Old
         // completion handlers remain token-guarded and cannot mutate state.
@@ -454,12 +688,36 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         isAnimating = false
     }
 
-    private func reconcilePointerAfterMovement() {
-        pointerInside = panel.frame.contains(NSEvent.mouseLocation)
-        switch machine.state {
-        case .retracted where pointerInside:
+    private func settlePointerAfterProgrammaticFrame() {
+        trackingEventFence = ProcessInfo.processInfo.systemUptime
+        requiresPhysicalMotionAfterFrameSettle = true
+        let point = pointerLocationProvider()
+        let transitionBaseline = frameTransitionPointerBaseline
+        frameTransitionPointerBaseline = nil
+        if let point {
+            frameSettlePointerLocation = point
+            pointerInside = panel.frame.contains(point)
+        }
+        let shouldReplayRailEntry = transitionBaseline?.animationToken == animationGeneration &&
+            PanelTrackingPolicy.shouldReplayRailEntry(
+                transitionStartPointer: transitionBaseline?.location,
+                settledPointer: point,
+                railFrame: panel.frame
+            )
+        if case .retracted = machine.state, shouldReplayRailEntry {
+            requiresPhysicalMotionAfterFrameSettle = false
             _ = process(.hoverEntered)
-        case .expanded where !pointerInside && !panel.isKeyWindow:
+            return
+        }
+        rearmFromTrackedPointerState()
+    }
+
+    /// Rearms only from pointer truth already accepted from local tracking or
+    /// a one-shot post-transition Quartz sample. A retracted panel never
+    /// manufactures rail entry merely because it moved under a still cursor.
+    private func rearmFromTrackedPointerState() {
+        switch machine.state {
+        case .expanded where !pointerInside:
             _ = process(.hoverExited)
         default:
             break
@@ -526,9 +784,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         switch machine.state {
         case .expanded:
             let token = machine.generation
-            transitionFrame(to: repaired, duration: 0, token: token) { [weak self] in
+            let target = lastRevealReason == .hover
+                ? PanelGeometryPolicy.railPlacement(for: repaired, screens: screenGeometries).map {
+                    PanelGeometryPolicy.hoverExpandedFrame(canonicalExpandedFrame: repaired, railPlacement: $0)
+                } ?? repaired
+                : repaired
+            transitionFrame(to: target, duration: 0, token: token) { [weak self] in
                 self?.configureExpandedPanel()
-                self?.reconcilePointerAfterMovement()
+                self?.settlePointerAfterProgrammaticFrame()
             }
         case .retracted:
             guard let placement = PanelGeometryPolicy.railPlacement(for: repaired, screens: screenGeometries) else {
@@ -540,18 +803,120 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             let token = machine.generation
             transitionFrame(to: placement.frame, duration: 0, token: token) { [weak self] in
                 self?.configureRetractedPanel()
-                self?.reconcilePointerAfterMovement()
+                self?.settlePointerAfterProgrammaticFrame()
             }
         case .hidden:
             panel.setFrame(repaired, display: false)
         }
     }
 
+    @objc private func interactionBegan(_ notification: Notification) {
+        isMenuTracking = true
+        cancelPendingWork()
+    }
+
     @objc private func interactionEnded(_ notification: Notification) {
         mouseButtonDown = false
+        if notification.name == NSMenu.didEndTrackingNotification { isMenuTracking = false }
         guard !isAnimating else { return }
-        reconcilePointerAfterMovement()
+        rearmFromTrackedPointerState()
     }
+
+    @objc private func textEditingBegan(_ notification: Notification) {
+        guard let editor = notification.object as? NSView, editor.window === panel else { return }
+        activeTextEditor = editor
+        isTextEditing = true
+        cancelPendingWork()
+    }
+
+    @objc private func textEditingEnded(_ notification: Notification) {
+        guard let editor = notification.object as? NSView,
+              activeTextEditor === editor || editor.window === panel else { return }
+        clearTextEditingHold()
+        guard !isAnimating else { return }
+        rearmFromTrackedPointerState()
+    }
+
+    @objc private func frontmostApplicationChanged(_ notification: Notification) {
+        guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              application.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        invalidateComposerFocusRequest()
+        clearTextEditingHold()
+        mouseButtonDown = false
+        guard !isAnimating else { return }
+        rearmFromTrackedPointerState()
+    }
+
+    private func textInputActivity() {
+        cancelPendingWork()
+        if !captureTextEditingHoldFromResponder(matching: nil), !isAnimating {
+            // List navigation/copy is transient engagement: restart the bounded
+            // outside grace without manufacturing a persistent editing hold.
+            rearmFromTrackedPointerState()
+        }
+    }
+
+    @discardableResult
+    private func captureTextEditingHoldFromResponder(matching target: NSView?) -> Bool {
+        guard let editor = panel.firstResponder as? NSTextView, editor.isEditable else { return false }
+        if let target {
+            let matchesTextView = target === editor
+            let matchesFieldEditor = (target as? NSTextField).map {
+                panel.fieldEditor(false, for: $0) === editor
+            } ?? false
+            guard matchesTextView || matchesFieldEditor else { return false }
+        }
+        activeTextEditor = editor
+        isTextEditing = true
+        cancelPendingWork()
+        return true
+    }
+
+    private func clearTextEditingHold() {
+        activeTextEditor = nil
+        isTextEditing = false
+    }
+
+    private func invalidateComposerFocusRequest() {
+        composerFocusGeneration &+= 1
+    }
+
+    private func trace(_ message: @autoclosure () -> String) {
+        guard panelTraceEnabled else { return }
+        let line = "[CuePanelTrace] \(Date().timeIntervalSince1970) \(message())\n"
+        FileHandle.standardError.write(Data(line.utf8))
+    }
+
+    /// Actual AppKit integration seam: drives the real retained-Sidecar panel
+    /// through the reducer into a rail without waiting for wall-clock input.
+    /// Production paths never call this method.
+    func runIntegrationRetractionProbe() -> NSRect? {
+        _ = process(.show(reason: .hover))
+        pointerInside = false
+        clearTextEditingHold()
+        mouseButtonDown = false
+        isMenuTracking = false
+        let effects = process(.hoverExited)
+        guard let token = effects.compactMap({ effect -> Int? in
+            if case let .scheduleRetraction(token) = effect { return token }
+            return nil
+        }).first else { return nil }
+        cancelPendingWork()
+        guard let placement = PanelGeometryPolicy.railPlacement(for: expandedFrame, screens: screenGeometries) else { return nil }
+        pendingRailPlacement = placement
+        _ = process(.retractDeadline(token: token, edge: placement.edge))
+        return placement.frame
+    }
+
+    func runIntegrationPointerEntered(timestamp: TimeInterval) {
+        acceptTrackingEvent(.entered, timestamp: timestamp)
+    }
+
+    var integrationPresentationState: PanelPresentationState { machine.state }
+    var integrationPresentationGeneration: Int { machine.generation }
+    var integrationPanelFrame: NSRect { panel.frame }
+    var integrationPanelMinSize: NSSize { panel.minSize }
+    var integrationContentMinSize: NSSize { panel.contentMinSize }
 
     private var screenGeometries: [PanelScreenGeometry] {
         NSScreen.screens.enumerated().map { index, screen in

@@ -125,6 +125,46 @@ struct PanelRailPlacement: Sendable {
     var isPhysicalOuterEdge: Bool
 }
 
+enum PanelTrackingEventKind: Sendable {
+    case entered
+    case exited
+}
+
+/// Accepts native tracking events only when they are newer than the most
+/// recent programmatic frame move and are not contradicted by Quartz's
+/// current global pointer position.
+enum PanelTrackingPolicy {
+    static func accepts(
+        _ kind: PanelTrackingEventKind,
+        eventTimestamp: TimeInterval,
+        fence: TimeInterval,
+        isAnimating: Bool,
+        actualPointerInside: Bool?,
+        actualPointerMovedSinceSettle: Bool?,
+        requiresPhysicalMotionEvidence: Bool
+    ) -> Bool {
+        guard !isAnimating, eventTimestamp > fence else { return false }
+        if requiresPhysicalMotionEvidence, actualPointerMovedSinceSettle != true { return false }
+        switch (kind, actualPointerInside) {
+        case (.entered, false), (.exited, true):
+            return false
+        default:
+            return true
+        }
+    }
+
+    static func shouldReplayRailEntry(
+        transitionStartPointer: CGPoint?,
+        settledPointer: CGPoint?,
+        railFrame: CGRect
+    ) -> Bool {
+        guard let transitionStartPointer, let settledPointer,
+              railFrame.contains(settledPointer) else { return false }
+        return abs(settledPointer.x - transitionStartPointer.x) > 0.5 ||
+            abs(settledPointer.y - transitionStartPointer.y) > 0.5
+    }
+}
+
 enum PanelGeometryPolicy {
     static let minimumExpandedSize = CGSize(width: 352, height: 500)
     static let maximumExpandedSize = CGSize(width: 560, height: 900)
@@ -191,6 +231,23 @@ enum PanelGeometryPolicy {
         }
     }
 
+    /// A hover preview may temporarily bridge the expanded panel to its rail.
+    /// The canonical expanded frame remains unchanged and is restored for
+    /// explicit or pinned presentation.
+    static func hoverExpandedFrame(
+        canonicalExpandedFrame: CGRect,
+        railPlacement: PanelRailPlacement
+    ) -> CGRect {
+        var frame = canonicalExpandedFrame
+        switch railPlacement.edge {
+        case .left:
+            frame.origin.x += railPlacement.frame.minX - canonicalExpandedFrame.minX
+        case .right:
+            frame.origin.x += railPlacement.frame.maxX - canonicalExpandedFrame.maxX
+        }
+        return frame
+    }
+
     private static func placement(
         edge: PanelEdge,
         y: CGFloat,
@@ -234,6 +291,34 @@ enum PanelGeometryPolicy {
         let dx = lhs.x - rhs.x
         let dy = lhs.y - rhs.y
         return dx * dx + dy * dy
+    }
+}
+
+/// Snapshot of interaction facts sampled by the AppKit owner at a retract
+/// deadline. `isKeyWindow` is deliberately not an engagement hold: a
+/// nonactivating NSPanel can remain key after the user has moved to another app.
+struct PanelEngagementSnapshot: Equatable, Sendable {
+    var panelPinned = false
+    var pointerInside = false
+    var isKeyWindow = false
+    var isTextEditing = false
+    var mouseButtonDown = false
+    var isMenuTracking = false
+    var isLiveResizing = false
+    var hasAttachedSheet = false
+    var hasModalWindow = false
+}
+
+enum PanelEngagementPolicy {
+    static func allowsAutoRetraction(_ snapshot: PanelEngagementSnapshot) -> Bool {
+        !snapshot.panelPinned &&
+            !snapshot.pointerInside &&
+            !snapshot.isTextEditing &&
+            !snapshot.mouseButtonDown &&
+            !snapshot.isMenuTracking &&
+            !snapshot.isLiveResizing &&
+            !snapshot.hasAttachedSheet &&
+            !snapshot.hasModalWindow
     }
 }
 

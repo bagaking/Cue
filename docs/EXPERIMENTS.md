@@ -167,6 +167,9 @@ but cannot prove focus, Dock, Stage Manager, or physical display behavior.
 2. Type an unfinished composer draft, then click the editor and let Cue retract.
    Hover or click the handle. The draft, list selection, and scroll position must
    survive; a hover reveal must not place a caret or steal keyboard input.
+   While the composer caret is actively editing, moving the pointer away must
+   not retract Cue. Activate Finder without changing Cue's apparent key-window
+   styling; editing protection should end and idle Cue should retract normally.
 3. Resize expanded Cue to 352×500, then to 560×900. Retract and reveal after
    each size. The exact expanded size should return, content must not clip, and
    the compact header must keep its Panel Pin control visible.
@@ -181,8 +184,10 @@ but cannot prove focus, Dock, Stage Manager, or physical display behavior.
    frame drift, stuck transparency, stale animation, or an unreachable handle.
 6. Quit and relaunch with `--show`. Cue should restore only the last expanded
    position and size—not a 22×88 rail frame—and `--show` should explicitly open
-   it. Turn Reduce Motion on and repeat; frames should change immediately with
-   the same state semantics.
+   it. Without clicking Cue or another window, leave the pointer outside: the
+   explicit reveal should remain usable for the bounded delay and then retract,
+   even if AppKit still reports the nonactivating panel as key. Turn Reduce
+   Motion on and repeat; frames should change immediately with the same state semantics.
 7. With Dock or Stage Manager on each side, verify Cue prefers the unobstructed
    horizontal edge. Enter a full-screen Space and verify the handle remains
    reachable without moving Cue to another Space.
