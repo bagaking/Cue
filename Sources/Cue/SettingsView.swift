@@ -331,14 +331,17 @@ private struct WorkspaceSettings: View {
 
     private func createWorkspace() {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.nameFieldStringValue = "Cue Workspace.md"
+        panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
+        panel.nameFieldStringValue = "Cue Workspace.cue"
         if panel.runModal() == .OK, let url = panel.url { model.createWorkspace(title: url.deletingPathExtension().lastPathComponent, at: url) }
     }
 
     private func openWorkspace() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = false
         if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
     }
 }
@@ -348,7 +351,7 @@ private struct PrivacySettings: View {
 
     var body: some View {
         SettingsPage(title: "Privacy", subtitle: "The boundary is visible and boring on purpose.") {
-            PrivacyRow(symbol: "externaldrive.fill", title: "Content storage", detail: "Local Markdown workspace files chosen by you")
+            PrivacyRow(symbol: "externaldrive.fill", title: "Content storage", detail: "Local .cue packages with one readable Markdown file per item")
             PrivacyRow(symbol: "network.slash", title: "Note content network", detail: "No network code path; content is never uploaded")
             PrivacyRow(symbol: "chart.bar.xaxis", title: "Analytics and telemetry", detail: "None implemented")
             PrivacyRow(symbol: "rectangle.and.text.magnifyingglass", title: "Selection capture", detail: "Only after double Shift or the explicit Capture command")

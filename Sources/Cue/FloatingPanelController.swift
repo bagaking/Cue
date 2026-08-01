@@ -21,6 +21,8 @@ final class CuePanel: NSPanel {
 /// animation and disconnected-display frame repair.
 @MainActor
 final class FloatingPanelController: NSObject, NSWindowDelegate {
+    private static let minimumSize = NSSize(width: 352, height: 500)
+    private static let maximumSize = NSSize(width: 560, height: 900)
     private let panel: CuePanel
     private var toggleGeneration = 0
     private var isAnimating = false
@@ -51,8 +53,8 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         panel.standardWindowButton(.closeButton)?.isHidden = true
         panel.standardWindowButton(.miniaturizeButton)?.isHidden = true
         panel.standardWindowButton(.zoomButton)?.isHidden = true
-        panel.contentMinSize = NSSize(width: 320, height: 420)
-        panel.contentMaxSize = NSSize(width: 480, height: 840)
+        panel.contentMinSize = Self.minimumSize
+        panel.contentMaxSize = Self.maximumSize
         panel.delegate = self
 
         let hosting = NSHostingView(rootView: SidecarView(model: model).ignoresSafeArea(.container, edges: .top))
@@ -173,12 +175,12 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     private func clamp(_ frame: NSRect) -> NSRect? {
-        guard frame.width >= 320, frame.height >= 420,
+        guard frame.width >= Self.minimumSize.width, frame.height >= Self.minimumSize.height,
               let screen = NSScreen.screens.first(where: { $0.visibleFrame.intersects(frame) }) else { return nil }
         let visible = screen.visibleFrame
         var value = frame
-        value.size.width = min(max(value.width, 320), min(480, visible.width))
-        value.size.height = min(max(value.height, 420), visible.height)
+        value.size.width = min(max(value.width, Self.minimumSize.width), min(Self.maximumSize.width, visible.width))
+        value.size.height = min(max(value.height, Self.minimumSize.height), min(Self.maximumSize.height, visible.height))
         value.origin.x = min(max(value.minX, visible.minX + 8), visible.maxX - value.width - 8)
         value.origin.y = min(max(value.minY, visible.minY + 8), visible.maxY - value.height - 8)
         return value

@@ -120,7 +120,7 @@ enum MarkdownLayoutEntry: Codable, Equatable, Sendable {
 }
 
 struct WorkspaceDocument: Codable, Equatable, Sendable {
-    static let currentSchema = 1
+    static let currentSchema = 2
 
     var schemaVersion: Int
     var id: UUID
@@ -270,6 +270,10 @@ struct FileFingerprint: Equatable, Sendable {
     var size: UInt64
     var modifiedAt: Date
     var digest: String
+
+    static func == (lhs: FileFingerprint, rhs: FileFingerprint) -> Bool {
+        lhs.size == rhs.size && lhs.digest == rhs.digest
+    }
 }
 
 enum WorkspaceStoreError: LocalizedError, Equatable {
@@ -283,7 +287,7 @@ enum WorkspaceStoreError: LocalizedError, Equatable {
         case .externalModification:
             "The workspace changed outside Cue. Reload or save a copy before continuing."
         case .missingFile:
-            "The workspace file moved or is unavailable."
+            "The workspace package moved or is unavailable."
         case let .invalidDocument(message):
             "The workspace could not be read: \(message)"
         case let .writeFailure(message):

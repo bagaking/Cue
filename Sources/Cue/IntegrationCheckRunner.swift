@@ -18,8 +18,10 @@ enum IntegrationCheckRunner {
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CueIntegration-\(UUID())", isDirectory: true)
         let settingsStore = SettingsStore(directoryURL: root.appendingPathComponent("Settings", isDirectory: true))
-        let model = AppModel(settingsStore: settingsStore, workspaceStore: WorkspaceStore())
-        let firstURL = root.appendingPathComponent("Alpha.md")
+        let workspaceStore = WorkspaceStore(cacheDirectoryURL: root.appendingPathComponent("Cache", isDirectory: true))
+        let externalStore = WorkspaceStore(cacheDirectoryURL: root.appendingPathComponent("ExternalCache", isDirectory: true))
+        let model = AppModel(settingsStore: settingsStore, workspaceStore: workspaceStore)
+        let firstURL = root.appendingPathComponent("Alpha.cue", isDirectory: true)
         model.createWorkspace(title: "Alpha", at: firstURL)
         check(model.hasWorkspace && model.activeWorkspaceTitle == "Alpha", "workspace creation becomes active")
 
@@ -82,7 +84,7 @@ enum IntegrationCheckRunner {
         model.restore([firstItem.id])
         check(model.document?.items.first(where: { $0.id == firstItem.id })?.state == .queued, "Archive restore is recoverable")
 
-        let secondURL = root.appendingPathComponent("Beta.md")
+        let secondURL = root.appendingPathComponent("Beta.cue", isDirectory: true)
         model.createWorkspace(title: "Beta", at: secondURL)
         let betaID = model.settings.activeWorkspaceID!
         let alphaID = model.settings.workspaces.first(where: { $0.title == "Alpha" })!.id
@@ -112,12 +114,15 @@ enum IntegrationCheckRunner {
             contentHash: ContentHasher.hash(externalBody),
             order: 99
         ))
-        let originalExternalBytes = try! MarkdownWorkspaceCodec.encode(externalDocument)
-        try? Data(originalExternalBytes.utf8).write(to: firstURL, options: .atomic)
+        let originalExternalFingerprint = try! externalStore.write(
+            document: externalDocument,
+            to: firstURL,
+            expectedFingerprint: externalStore.fingerprint(for: firstURL)
+        )
         let conflictOutcome = model.addItem(body: "Must survive conflict", kind: .prompt)
         check({ if case .storageFailure = conflictOutcome { return true }; return false }(), "external edit blocks a new write")
         check(model.recoveryMarkdown?.contains("Must survive conflict") == true, "failed write retains intended content in recovery buffer")
-        check((try? String(contentsOf: firstURL, encoding: .utf8)) == originalExternalBytes, "external file bytes are never silently overwritten")
+        check((try? externalStore.fingerprint(for: firstURL)) == originalExternalFingerprint, "external package files are never silently overwritten")
         let firstRecovery = model.recoveryMarkdown
         let blockedSecondMutation = model.addItem(body: "Must not replace first recovery", kind: .prompt)
         check({ if case .storageFailure = blockedSecondMutation { return true }; return false }(), "a buffered recovery blocks later mutations")
@@ -126,18 +131,18 @@ enum IntegrationCheckRunner {
         model.saveConflictCopy()
         let conflictCopies = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil))?
             .filter { $0.lastPathComponent.contains("cue-conflict") } ?? []
-        let savedConflict = conflictCopies.compactMap { try? String(contentsOf: $0, encoding: .utf8) }.first
-        check(savedConflict?.contains("Must survive conflict") == true, "Save Copy writes the intended recovery Markdown")
-        check((try? String(contentsOf: firstURL, encoding: .utf8)) == originalExternalBytes, "Save Copy still preserves external owner bytes")
+        let savedConflict = conflictCopies.compactMap { try? externalStore.load(from: $0).0 }.first
+        check(savedConflict?.items.contains(where: { $0.body == "Must survive conflict" }) == true, "Save Copy writes the intended recovery package")
+        check((try? externalStore.fingerprint(for: firstURL)) == originalExternalFingerprint, "Save Copy still preserves the external package")
 
         model.reloadAfterExternalEdit()
         check(model.activeWorkspaceTitle == "Alpha External" && model.document?.title == "Alpha External", "reload adopts the external workspace title consistently")
         let postReload = model.addItem(body: "Post reload change", kind: .prompt)
         check({ if case .captured = postReload { return true }; return false }(), "writes resume after an explicit reload")
         model.undo()
-        let afterFirstUndo = try? String(contentsOf: firstURL, encoding: .utf8)
+        let afterFirstUndo = try? externalStore.fingerprint(for: firstURL)
         model.undo()
-        check((try? String(contentsOf: firstURL, encoding: .utf8)) == afterFirstUndo, "failed conflict snapshots cannot poison later Undo")
+        check((try? externalStore.fingerprint(for: firstURL)) == afterFirstUndo, "failed conflict snapshots cannot poison later Undo")
 
         var nextExternal = model.document!
         let nextExternalBody = "Concurrent external addition"
@@ -148,14 +153,17 @@ enum IntegrationCheckRunner {
             contentHash: ContentHasher.hash(nextExternalBody),
             order: 200
         ))
-        let nextExternalMarkdown = try! MarkdownWorkspaceCodec.encode(nextExternal)
-        try? Data(nextExternalMarkdown.utf8).write(to: firstURL, options: .atomic)
+        _ = try! externalStore.write(
+            document: nextExternal,
+            to: firstURL,
+            expectedFingerprint: externalStore.fingerprint(for: firstURL)
+        )
         _ = model.addItem(body: "Concurrent local addition", kind: .prompt)
         model.prepareConflictMerge()
         check(model.conflictMergeRequest?.preview.contains(nextExternalBody) == true && model.conflictMergeRequest?.preview.contains("Concurrent local addition") == true, "safe merge preview contains both non-overlapping sides")
         model.confirmConflictMerge()
-        let mergedBytes = try? String(contentsOf: firstURL, encoding: .utf8)
-        check(mergedBytes?.contains(nextExternalBody) == true && mergedBytes?.contains("Concurrent local addition") == true, "confirmed safe merge preserves both sides")
+        let mergedPackage = try? externalStore.load(from: firstURL).0
+        check(mergedPackage?.items.contains(where: { $0.body == nextExternalBody }) == true && mergedPackage?.items.contains(where: { $0.body == "Concurrent local addition" }) == true, "confirmed safe merge preserves both sides")
         check(model.recoveryMarkdown == nil && model.storageHealth.needsAttention == false, "safe merge clears recovery only after a verified write")
 
         let sameItemID = model.document!.items[0].id
@@ -164,12 +172,15 @@ enum IntegrationCheckRunner {
         overlappingExternal.items[externalIndex].body = "External version of the same item"
         overlappingExternal.items[externalIndex].contentHash = ContentHasher.hash(overlappingExternal.items[externalIndex].body)
         overlappingExternal.items[externalIndex].updatedAt = Date()
-        let overlappingBytes = try! MarkdownWorkspaceCodec.encode(overlappingExternal)
-        try? Data(overlappingBytes.utf8).write(to: firstURL, options: .atomic)
+        _ = try! externalStore.write(
+            document: overlappingExternal,
+            to: firstURL,
+            expectedFingerprint: externalStore.fingerprint(for: firstURL)
+        )
         model.editItem(sameItemID, body: "Local version of the same item")
         model.prepareConflictMerge()
         check(model.conflictMergeRequest == nil && model.recoveryMarkdown?.contains("Local version") == true, "same-object edits refuse automatic merge and retain local recovery")
-        check((try? String(contentsOf: firstURL, encoding: .utf8))?.contains("External version") == true, "refused merge leaves the external owner file untouched")
+        check((try? externalStore.load(from: firstURL).0.items.first(where: { $0.id == sameItemID })?.body) == "External version of the same item", "refused merge leaves the external item untouched")
 
         try? FileManager.default.removeItem(at: secondURL)
         model.updateSettings { settings in

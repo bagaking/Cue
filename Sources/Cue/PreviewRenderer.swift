@@ -8,17 +8,24 @@ enum PreviewRenderer {
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         try render(view: SidecarView(model: model), size: NSSize(width: 372, height: 600), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-light.png"))
         try render(view: SidecarView(model: model), size: NSSize(width: 372, height: 600), appearance: .darkAqua, to: outputDirectory.appendingPathComponent("Cue-preview-dark.png"))
+        try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-light.png"))
+        try render(view: SidecarView(model: model), size: NSSize(width: 560, height: 500), appearance: .darkAqua, to: outputDirectory.appendingPathComponent("Cue-preview-wide-short-dark.png"))
+        model.selectedItemIDs = Set(model.visibleItems().prefix(2).map(\.id))
+        model.publishReceipt(Receipt(message: "2 items copied", symbol: "doc.on.doc.fill"))
+        try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-batch-receipt.png"))
+        model.clearSelection()
         try render(view: SettingsView(model: model), size: NSSize(width: 700, height: 480), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-settings-light.png"))
         try render(view: SettingsView(model: model), size: NSSize(width: 700, height: 480), appearance: .darkAqua, to: outputDirectory.appendingPathComponent("Cue-settings-dark.png"))
 
         let emptyRoot = FileManager.default.temporaryDirectory.appendingPathComponent("CueOnboardingPreview-\(UUID())", isDirectory: true)
         let emptyModel = AppModel(settingsStore: SettingsStore(directoryURL: emptyRoot), workspaceStore: WorkspaceStore())
         try render(view: SidecarView(model: emptyModel), size: NSSize(width: 372, height: 600), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-onboarding-light.png"))
+        try render(view: SidecarView(model: emptyModel), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-onboarding-min-light.png"))
     }
 
     private static func makePreviewModel() throws -> AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CuePreview-\(UUID())", isDirectory: true)
-        let workspaceURL = root.appendingPathComponent("Product Launch.md")
+        let workspaceURL = root.appendingPathComponent("Product Launch.cue", isDirectory: true)
         let settingsStore = SettingsStore(directoryURL: root.appendingPathComponent("Settings", isDirectory: true))
         let workspaceStore = WorkspaceStore()
 

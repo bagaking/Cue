@@ -26,6 +26,7 @@ struct SidecarView: View {
     @State private var showingNewSection = false
     @State private var newSectionTitle = ""
     @State private var completedExpanded = false
+    @State private var searchExpanded = false
     @FocusState private var focus: FocusTarget?
 
     private enum FocusTarget: Hashable { case search, list }
@@ -36,23 +37,27 @@ struct SidecarView: View {
     }
 
     var body: some View {
-        ZStack {
-            VisualEffectBackground(material: .popover)
-            Color(nsColor: .windowBackgroundColor)
-                .opacity((reduceTransparency || model.settings.reduceTranslucency) ? 0.98 : 0.72)
+        GeometryReader { geometry in
+            let compactHeight = geometry.size.height < 560
+            let compactWidth = geometry.size.width < 370
+            ZStack {
+                VisualEffectBackground(material: .popover)
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity((reduceTransparency || model.settings.reduceTranslucency) ? 0.98 : 0.72)
 
-            if model.hasWorkspace {
-                content
-            } else {
-                OnboardingView(model: model)
+                if model.hasWorkspace {
+                    content(compactHeight: compactHeight, compactWidth: compactWidth)
+                } else {
+                    OnboardingView(model: model, compact: compactHeight)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 1)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.09), lineWidth: 1)
-        }
-        .frame(minWidth: 320, idealWidth: 372, maxWidth: 480, minHeight: 420, idealHeight: 600)
+        .frame(minWidth: 352, idealWidth: 372, maxWidth: 560, minHeight: 500, idealHeight: 600, maxHeight: 900)
         .sheet(item: $editingItem) { item in
             EditItemSheet(item: item) { model.editItem(item.id, body: $0) }
         }
@@ -119,6 +124,7 @@ struct SidecarView: View {
         }
         .onKeyPress(keys: ["f", "F"], phases: .down) { press in
             guard press.modifiers.contains(.command) else { return .ignored }
+            searchExpanded = true
             focus = .search
             return .handled
         }
@@ -136,28 +142,28 @@ struct SidecarView: View {
         .onChange(of: model.query) { _, _ in model.clearSelection() }
     }
 
-    private var content: some View {
+    private func content(compactHeight: Bool, compactWidth: Bool) -> some View {
         VStack(spacing: 0) {
-            header
+            header(compactHeight: compactHeight, compactWidth: compactWidth)
             if model.storageHealth.needsAttention { storageBanner }
             Divider().opacity(0.55)
             list
             if model.selectedItemIDs.count > 1 { batchBar }
             Divider().opacity(0.55)
-            composer
+            composer(compact: compactHeight)
         }
         .overlay(alignment: .bottom) {
             if let receipt = model.receipt {
                 ReceiptView(receipt: receipt) { model.performReceiptAction(receipt.action) }
-                    .padding(.bottom, model.selectedItemIDs.count > 1 ? 100 : 66)
+                    .padding(.bottom, model.selectedItemIDs.count > 1 ? (compactHeight ? 84 : 100) : (compactHeight ? 54 : 66))
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: model.receipt?.id)
     }
 
-    private var header: some View {
-        VStack(spacing: 8) {
+    private func header(compactHeight: Bool, compactWidth: Bool) -> some View {
+        VStack(spacing: compactHeight ? 4 : 8) {
             HStack(spacing: 8) {
                 Menu {
                     ForEach(model.settings.workspaces) { workspace in
@@ -191,51 +197,85 @@ struct SidecarView: View {
 
                 Spacer()
 
-                Button {
-                    model.showingArchive.toggle()
-                    model.clearSelection()
-                } label: {
-                    Image(systemName: model.showingArchive ? "tray.full.fill" : "archivebox")
-                        .frame(width: 28, height: 28)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(model.showingArchive ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05)))
+                if compactHeight {
+                    Button {
+                        searchExpanded.toggle()
+                        if searchExpanded { focus = .search }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                            .frame(width: 28, height: 28)
+                            .background(RoundedRectangle(cornerRadius: 8).fill((searchExpanded || !model.query.isEmpty) ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05)))
+                    }
+                    .buttonStyle(.plain)
+                    .help(searchExpanded ? "Hide Search" : "Search")
+                    .accessibilityLabel(searchExpanded ? "Hide Search" : "Show Search")
                 }
-                .buttonStyle(.plain)
-                .help(model.showingArchive ? "Back to active queue" : "Open Archive")
-                .accessibilityLabel(model.showingArchive ? "Show active queue" : "Show Archive")
 
-                Button {
-                    model.onRequestSettings?()
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .frame(width: 28, height: 28)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                if compactWidth {
+                    Menu {
+                        Button(model.showingArchive ? "Show active queue" : "Open Archive") {
+                            model.showingArchive.toggle()
+                            model.clearSelection()
+                        }
+                        Button("Settings") { model.onRequestSettings?() }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 28, height: 28)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .help("More")
+                    .accessibilityLabel("More Cue actions")
+                } else {
+                    Button {
+                        model.showingArchive.toggle()
+                        model.clearSelection()
+                    } label: {
+                        Image(systemName: model.showingArchive ? "tray.full.fill" : "archivebox")
+                            .frame(width: 28, height: 28)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(model.showingArchive ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05)))
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.showingArchive ? "Back to active queue" : "Open Archive")
+                    .accessibilityLabel(model.showingArchive ? "Show active queue" : "Show Archive")
+
+                    Button {
+                        model.onRequestSettings?()
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .frame(width: 28, height: 28)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Settings")
+                    .accessibilityLabel("Open Settings")
                 }
-                .buttonStyle(.plain)
-                .help("Settings")
-                .accessibilityLabel("Open Settings")
             }
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                TextField(model.showingArchive ? "Search Archive" : "Search next thoughts", text: $model.query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .focused($focus, equals: .search)
-                if !model.query.isEmpty {
-                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.tertiary)
+            if !compactHeight || searchExpanded || !model.query.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    TextField(model.showingArchive ? "Search Archive" : "Search next thoughts", text: $model.query)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13))
+                        .focused($focus, equals: .search)
+                    if !model.query.isEmpty {
+                        Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
+                .padding(.horizontal, 10)
+                .padding(.vertical, compactHeight ? 5 : 7)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05)))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.primary.opacity(0.05)))
         }
         .padding(.horizontal, 12)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
+        .padding(.top, compactHeight ? 7 : 10)
+        .padding(.bottom, compactHeight ? 7 : 10)
     }
 
     private var list: some View {
@@ -405,8 +445,8 @@ struct SidecarView: View {
             .accessibilityLabel(help)
     }
 
-    private var composer: some View {
-        VStack(alignment: .leading, spacing: 5) {
+    private func composer(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 3 : 5) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.up.message")
                     .font(.system(size: 11, weight: .medium))
@@ -417,12 +457,14 @@ struct SidecarView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer()
-                Text("⌘↩")
-                    .font(.system(size: 9.5, design: .rounded))
-                    .foregroundStyle(.tertiary)
+                if !compact {
+                    Text("⌘↩")
+                        .font(.system(size: 9.5, design: .rounded))
+                        .foregroundStyle(.tertiary)
+                }
             }
             ComposerTextView(text: $model.composerText, onCommit: model.queueComposer)
-                .frame(height: 40)
+                .frame(height: compact ? 32 : 40)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color(nsColor: .textBackgroundColor).opacity(0.82)))
@@ -439,8 +481,8 @@ struct SidecarView: View {
                 }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 7)
-        .padding(.bottom, 9)
+        .padding(.top, compact ? 5 : 7)
+        .padding(.bottom, compact ? 6 : 9)
     }
 
     @ViewBuilder
@@ -479,7 +521,7 @@ struct SidecarView: View {
         switch model.storageHealth {
         case .ready: "Workspace ready"
         case .externallyModified: "Workspace changed outside Cue"
-        case .fileMissing: "Workspace file moved"
+        case .fileMissing: "Workspace package moved"
         case let .writeFailed(message): message
         case .recoveryBuffered: "Workspace write paused"
         }
@@ -511,8 +553,8 @@ struct SidecarView: View {
     private func showCreatePanel() {
         let panel = NSSavePanel()
         panel.title = "Create Cue Workspace"
-        panel.nameFieldStringValue = "Cue Workspace.md"
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = "Cue Workspace.cue"
+        panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
         if panel.runModal() == .OK, let url = panel.url {
             model.createWorkspace(title: url.deletingPathExtension().lastPathComponent, at: url)
         }
@@ -521,7 +563,10 @@ struct SidecarView: View {
     private func showOpenPanel() {
         let panel = NSOpenPanel()
         panel.title = "Open Cue Workspace"
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
     }
@@ -529,9 +574,11 @@ struct SidecarView: View {
 
 private struct OnboardingView: View {
     @ObservedObject var model: AppModel
+    var compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: compact ? 13 : 18) {
             Spacer()
             ZStack {
                 RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12))
@@ -545,7 +592,7 @@ private struct OnboardingView: View {
                 Text("Keep the next thought\nwithout leaving your work.")
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .tracking(-0.35)
-                Text("Cue keeps selected fragments and future prompts in one small, completable queue. Your Markdown stays on this Mac.")
+                Text("Cue keeps selected fragments and future prompts in one small, completable queue. Each item stays readable inside your local workspace package.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -563,10 +610,13 @@ private struct OnboardingView: View {
 
                 Button {
                     let panel = NSOpenPanel()
-                    panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+                    panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = true
+                    panel.treatsFilePackagesAsDirectories = false
                     if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
                 } label: {
-                    Label("Open an existing Cue file", systemImage: "folder")
+                    Label("Open an existing Cue workspace", systemImage: "folder")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -580,8 +630,9 @@ private struct OnboardingView: View {
             .font(.system(size: 11, weight: .medium))
             .foregroundStyle(.secondary)
             Spacer()
+            }
+            .padding(compact ? 16 : 24)
         }
-        .padding(24)
     }
 }
 

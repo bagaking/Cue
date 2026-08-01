@@ -40,6 +40,7 @@ final class AppModel: ObservableObject {
     private let settingsStore: SettingsStore
     private let workspaceStore: WorkspaceStore
     private var expectedFingerprint: FileFingerprint?
+    private var recoveryDocument: WorkspaceDocument?
     private var undoStack: [WorkspaceDocument] = []
     private var orderedSelection = ItemSelectionModel()
     private var receiptDismissTask: Task<Void, Never>?
@@ -140,10 +141,10 @@ final class AppModel: ObservableObject {
     func createDefaultWorkspace() {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let directory = documents.appendingPathComponent("Cue", isDirectory: true)
-        var url = directory.appendingPathComponent("Cue Workspace.md")
+        var url = directory.appendingPathComponent("Cue Workspace.cue", isDirectory: true)
         var suffix = 2
         while FileManager.default.fileExists(atPath: url.path) {
-            url = directory.appendingPathComponent("Cue Workspace \(suffix).md")
+            url = directory.appendingPathComponent("Cue Workspace \(suffix).cue", isDirectory: true)
             suffix += 1
         }
         createWorkspace(title: "Cue Workspace", at: url)
@@ -166,6 +167,8 @@ final class AppModel: ObservableObject {
             try settingsStore.save(settings)
             self.document = document
             expectedFingerprint = fingerprint
+            recoveryDocument = nil
+            recoveryMarkdown = nil
             activeSectionID = document.inbox.id
             undoStack.removeAll()
             storageHealth = .ready(lastWrite: Date())
@@ -191,13 +194,15 @@ final class AppModel: ObservableObject {
             try settingsStore.save(settings)
             document = loaded
             expectedFingerprint = fingerprint
+            recoveryDocument = nil
+            recoveryMarkdown = nil
             activeSectionID = loaded.inbox.id
             undoStack.removeAll()
             storageHealth = .ready(lastWrite: nil)
             publishReceipt(Receipt(message: "Opened · \(loaded.title)", symbol: "folder"))
         } catch {
             storageHealth = .writeFailed(message: error.localizedDescription)
-            publishReceipt(Receipt(message: "That file is not a readable Cue workspace", symbol: "doc.badge.ellipsis", isError: true))
+            publishReceipt(Receipt(message: "That package is not a readable Cue workspace", symbol: "doc.badge.ellipsis", isError: true))
         }
     }
 
@@ -219,6 +224,8 @@ final class AppModel: ObservableObject {
             settings = updatedSettings
             document = loaded
             expectedFingerprint = fingerprint
+            recoveryDocument = nil
+            recoveryMarkdown = nil
             activeSectionID = loaded.inbox.id
             selectedItemIDs.removeAll()
             focusedItemID = nil
@@ -688,19 +695,20 @@ final class AppModel: ObservableObject {
             completionDwellTasks.removeAll()
             dwellingCompletedIDs.removeAll()
             recoveryMarkdown = nil
+            recoveryDocument = nil
             conflictMergeRequest = nil
             publishReceipt(Receipt(message: "Reloaded external changes", symbol: "arrow.clockwise.circle.fill"))
         } else {
-            publishReceipt(Receipt(message: "External file is not a readable Cue workspace", symbol: "doc.badge.ellipsis", isError: true))
+            publishReceipt(Receipt(message: "External package is not a readable Cue workspace", symbol: "doc.badge.ellipsis", isError: true))
         }
     }
 
     func saveConflictCopy() {
         guard let document, let url = activeWorkspaceURL else { return }
         do {
-            let markdown = try recoveryMarkdown ?? MarkdownWorkspaceCodec.encode(document)
-            let copy = try workspaceStore.saveConflictCopy(markdown: markdown, nextTo: url)
+            let copy = try workspaceStore.saveConflictCopy(document: recoveryDocument ?? document, nextTo: url)
             recoveryMarkdown = nil
+            recoveryDocument = nil
             conflictMergeRequest = nil
             if !FileManager.default.fileExists(atPath: url.path) {
                 storageHealth = .fileMissing
@@ -719,13 +727,12 @@ final class AppModel: ObservableObject {
 
     func prepareConflictMerge() {
         guard let baseline = document,
-              let recoveryMarkdown,
+              let local = recoveryDocument,
               let url = activeWorkspaceURL else { return }
         do {
             let normalizedBaseline = try MarkdownWorkspaceCodec.decode(
                 MarkdownWorkspaceCodec.encode(baseline)
             )
-            let local = try MarkdownWorkspaceCodec.decode(recoveryMarkdown)
             let (external, externalFingerprint) = try workspaceStore.load(from: url)
             let merged = try mergeDocuments(
                 baseline: normalizedBaseline,
@@ -767,6 +774,7 @@ final class AppModel: ObservableObject {
             undoStack.append(request.externalDocument)
             if undoStack.count > 30 { undoStack.removeFirst(undoStack.count - 30) }
             recoveryMarkdown = nil
+            recoveryDocument = nil
             conflictMergeRequest = nil
             storageHealth = .ready(lastWrite: Date())
             clearSelection()
@@ -889,6 +897,7 @@ final class AppModel: ObservableObject {
             self.document = document
             storageHealth = .ready(lastWrite: Date())
             recoveryMarkdown = nil
+            recoveryDocument = nil
             return true
         } catch WorkspaceStoreError.externalModification {
             storageHealth = .externallyModified
@@ -897,6 +906,7 @@ final class AppModel: ObservableObject {
         } catch {
             storageHealth = .writeFailed(message: error.localizedDescription)
         }
+        recoveryDocument = document
         recoveryMarkdown = try? MarkdownWorkspaceCodec.encode(document)
         storageHealth = .recoveryBuffered
         publishReceipt(Receipt(
@@ -1074,7 +1084,7 @@ final class AppModel: ObservableObject {
     private func installDemoWorkspaceIfNeeded() {
         guard settings.workspaces.isEmpty else { return }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Cue Demo", isDirectory: true)
-        let url = directory.appendingPathComponent("Product Launch.md")
+        let url = directory.appendingPathComponent("Product Launch.cue", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try? FileManager.default.removeItem(at: url)
 

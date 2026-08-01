@@ -13,6 +13,8 @@ swiftc \
   Sources/Cue/Models.swift \
   Sources/Cue/ContentHasher.swift \
   Sources/Cue/MarkdownWorkspaceCodec.swift \
+  Sources/Cue/WorkspacePackageCodec.swift \
+  Sources/Cue/WorkspaceSearchIndex.swift \
   Sources/Cue/WorkspaceStore.swift \
   Sources/Cue/ItemSelectionModel.swift \
   Sources/Cue/ModifierTapDetector.swift \

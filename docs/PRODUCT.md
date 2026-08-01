@@ -36,12 +36,20 @@ Every selected fragment and typed prompt is a `WorkItem` with one lifecycle: que
 
 ## Storage and recovery
 
-- Markdown workspace files remain editable outside Cue.
-- Cue fingerprints the loaded file and refuses silent last-write-wins behavior.
-- A failed write keeps the exact intended Markdown snapshot in a recovery buffer; later mutations are paused so they cannot replace it.
-- Recovery offers exact Copy/Save Copy plus a previewed three-way merge. Only non-overlapping object changes merge automatically; external prose remains authoritative and same-object conflicts stop.
-- A timestamped backup is made before replacing an existing file; at least the latest ten are retained.
+- `.cue` workspace packages remain editable outside Cue; each WorkItem body lives in its own Markdown document.
+- Cue fingerprints all source files in the loaded package and refuses silent last-write-wins behavior.
+- A failed write keeps the exact intended document state plus a readable Markdown recovery export; later mutations are paused so they cannot replace it.
+- Recovery offers exact Copy, a complete conflict-copy package, and a previewed three-way merge. Only non-overlapping object changes merge automatically; same-object conflicts stop.
+- A timestamped package backup is made before changing an existing workspace; at least the latest ten are retained.
+- Tombstones make physical deletion syncable. The local search index is rebuildable and never authoritative.
 - Merge archives originals with provenance and can be undone as one snapshot.
+
+## Responsive window contract
+
+- The supported resize range is 352×500 through 560×900 points.
+- Below 560 points tall, Cue collapses Search behind an explicit button and reduces composer chrome while keeping queue and input reachable.
+- At compact width, Archive and Settings move into one More menu instead of truncating the workspace title.
+- Onboarding scrolls at the minimum size; accepting a frame is not considered support if content is clipped.
 
 ## V1 exclusions
 

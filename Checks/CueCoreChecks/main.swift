@@ -114,14 +114,23 @@ private func checkMarkdown() {
 
 private func checkStorage() {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
-    let url = directory.appendingPathComponent("workspace.md")
-    let store = WorkspaceStore()
+    let url = directory.appendingPathComponent("workspace.cue", isDirectory: true)
+    let store = WorkspaceStore(cacheDirectoryURL: directory.appendingPathComponent("Cache", isDirectory: true))
     var document = sampleDocument()
 
     do {
         let fingerprint = try store.create(document: document, at: url)
+        check(FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.yaml").path), "package writes a readable manifest")
+        check(FileManager.default.fileExists(atPath: url.appendingPathComponent(WorkspacePackageCodec.sectionPath(document.sections[0])).path), "package writes one section record per section")
+        let itemURL = url.appendingPathComponent(WorkspacePackageCodec.itemPath(document.items[0]))
+        check(FileManager.default.fileExists(atPath: itemURL.path), "package writes one Markdown document per item")
+        check(FileManager.default.fileExists(atPath: url.appendingPathComponent("assets/sha256").path), "package reserves content-addressed assets")
+        let readableItem = try String(contentsOf: itemURL, encoding: .utf8)
+        check(readableItem.contains(document.items[0].body), "item Markdown keeps the body directly readable")
+
         document.title = "Local change"
-        try Data("external edit".utf8).write(to: url, options: .atomic)
+        let externalItem = readableItem.replacingOccurrences(of: "**Claim**", with: "**External claim**")
+        try Data(externalItem.utf8).write(to: itemURL, options: .atomic)
         do {
             _ = try store.write(document: document, to: url, expectedFingerprint: fingerprint)
             check(false, "external edit blocks overwrite")
@@ -130,12 +139,12 @@ private func checkStorage() {
         } catch {
             check(false, "external edit reports the correct conflict")
         }
-        check(try String(contentsOf: url, encoding: .utf8) == "external edit", "conflict leaves external bytes untouched")
+        check(try String(contentsOf: itemURL, encoding: .utf8) == externalItem, "conflict leaves external item bytes untouched")
+        check(try store.load(from: url).0.items[0].body.contains("External claim"), "reload adopts a direct Markdown body edit")
 
-        let recovery = try MarkdownWorkspaceCodec.encode(document)
-        let firstCopy = try store.saveConflictCopy(markdown: recovery, nextTo: url)
-        let secondCopy = try store.saveConflictCopy(markdown: recovery, nextTo: url)
-        check(try String(contentsOf: firstCopy, encoding: .utf8) == recovery, "conflict copy preserves exact recovery Markdown")
+        let firstCopy = try store.saveConflictCopy(document: document, nextTo: url)
+        let secondCopy = try store.saveConflictCopy(document: document, nextTo: url)
+        check(try store.load(from: firstCopy).0.title == "Local change", "conflict copy preserves the intended package")
         check(firstCopy != secondCopy, "same-second conflict copies never overwrite each other")
     } catch {
         failed += 1
@@ -143,14 +152,40 @@ private func checkStorage() {
     }
 
     let backupDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
-    let backupURL = backupDirectory.appendingPathComponent("workspace.md")
+    let backupURL = backupDirectory.appendingPathComponent("workspace.cue", isDirectory: true)
+    let backupStore = WorkspaceStore(cacheDirectoryURL: backupDirectory.appendingPathComponent("Cache", isDirectory: true))
     do {
-        let initial = try store.create(document: document, at: backupURL)
-        document.items.append(WorkItem(body: "Next prompt", kind: .prompt, sectionID: document.inbox.id, contentHash: ContentHasher.hash("Next prompt"), order: 1))
-        _ = try store.write(document: document, to: backupURL, expectedFingerprint: initial)
+        var backupDocument = sampleDocument()
+        let removedID = backupDocument.items[0].id
+        let removedItemPath = WorkspacePackageCodec.itemPath(backupDocument.items[0])
+        let initial = try backupStore.create(document: backupDocument, at: backupURL)
+        check(FileManager.default.fileExists(atPath: backupStore.searchIndexURL(for: backupDocument.id).path), "write rebuilds a local search cache")
+        try FileManager.default.removeItem(at: backupStore.searchIndexURL(for: backupDocument.id))
+        try backupStore.rebuildSearchIndex(for: backupDocument)
+        check(FileManager.default.fileExists(atPath: backupStore.searchIndexURL(for: backupDocument.id).path), "search cache is rebuildable from package truth")
+
+        backupDocument.items.append(WorkItem(body: "Next prompt", kind: .prompt, sectionID: backupDocument.inbox.id, contentHash: ContentHasher.hash("Next prompt"), order: 1))
+        let secondFingerprint = try backupStore.write(document: backupDocument, to: backupURL, expectedFingerprint: initial)
         let backups = try FileManager.default.contentsOfDirectory(at: backupDirectory.appendingPathComponent(".cue-backups"), includingPropertiesForKeys: nil)
-        check(backups.filter { $0.pathExtension == "md" }.count == 1, "write creates timestamped backup")
-        check(try store.load(from: backupURL).0.items.contains(where: { $0.body == "Next prompt" }), "post-write document remains parseable")
+        check(backups.filter { $0.pathExtension == "cue" }.count == 1, "write creates a timestamped package backup")
+        check(try backupStore.load(from: backupURL).0.items.contains(where: { $0.body == "Next prompt" }), "post-write package remains parseable")
+
+        backupDocument.items.removeAll { $0.id == removedID }
+        _ = try backupStore.write(document: backupDocument, to: backupURL, expectedFingerprint: secondFingerprint)
+        check(FileManager.default.fileExists(atPath: backupURL.appendingPathComponent(WorkspacePackageCodec.tombstonePath(for: removedID)).path), "physical item deletion writes a tombstone")
+        check(!FileManager.default.fileExists(atPath: backupURL.appendingPathComponent(removedItemPath).path), "deleted item document leaves the active item tree")
+
+        let legacyURL = backupDirectory.appendingPathComponent("Legacy Workspace.md")
+        try Data(MarkdownWorkspaceCodec.encode(sampleDocument()).utf8).write(to: legacyURL)
+        do {
+            _ = try backupStore.load(from: legacyURL)
+            check(false, "legacy single-file workspaces stay outside the runtime path")
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, "legacy single-file workspaces stay outside the runtime path")
+        }
+        let importedURL = backupDirectory.appendingPathComponent("Imported Workspace.cue", isDirectory: true)
+        _ = try backupStore.importLegacyWorkspace(from: legacyURL, to: importedURL)
+        check(try backupStore.load(from: importedURL).0.items.count == 1, "one-time legacy importer rescues data into a package")
     } catch {
         failed += 1
         print("FAIL  backup and validation: \(error)")

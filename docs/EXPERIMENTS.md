@@ -23,7 +23,7 @@ dist/Cue.app/Contents/MacOS/Cue --show
 
 Quit any already-running Cue instance from its menu-bar menu before using a
 command-line QA entry point. This prevents two Cue processes from competing for
-the same global shortcuts and workspace file.
+the same global shortcuts and workspace package.
 
 Create a fresh workspace from Cue's workspace menu if you want an isolated
 trial. This avoids deleting or resetting existing Cue settings and data.
@@ -38,7 +38,7 @@ trial. This avoids deleting or resetting existing Cue settings and data.
 4. Quit and relaunch Cue with `--show`; confirm the card is still present.
 
 Pass: multiline content is exact, no Accessibility permission is required, and
-the Markdown workspace contains the item.
+the `.cue/items/YYYY/MM/` tree contains one readable Markdown document for the item.
 
 ### 2. Exact selected-text capture
 
@@ -133,8 +133,11 @@ Run these only with disposable text:
 - Attempt capture from a secure password field. Cue must persist zero content.
 - Add an app bundle identifier to the denylist and capture from that app. Cue
   must persist zero content.
-- Edit the workspace Markdown externally while Cue is open, then mutate a Cue
+- Edit one item Markdown document inside the `.cue` package while Cue is open, then mutate a Cue
   item. Cue must stop the write and offer recovery instead of overwriting.
+- Resize the panel to 352×500 points. Search should collapse into the header,
+  Archive/Settings should remain available from More, the composer should stay
+  usable, and onboarding should scroll instead of clipping.
 
 ## Physical input checks
 
@@ -158,5 +161,5 @@ For a reviewable experiment, retain:
 - Cue executable SHA-256 (`shasum -a 256 dist/Cue.app/Contents/MacOS/Cue`)
 - the five-task result table
 - pasted batch-copy output
-- the workspace Markdown before and after recovery probes
+- the workspace package manifest and edited item Markdown before and after recovery probes
 - screen recording or timestamps for capture latency and focus preservation
