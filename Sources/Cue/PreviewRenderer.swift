@@ -10,6 +10,12 @@ enum PreviewRenderer {
         try render(view: SidecarView(model: model), size: NSSize(width: 372, height: 600), appearance: .darkAqua, to: outputDirectory.appendingPathComponent("Cue-preview-dark.png"))
         try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-light.png"))
         try render(view: SidecarView(model: model), size: NSSize(width: 560, height: 500), appearance: .darkAqua, to: outputDirectory.appendingPathComponent("Cue-preview-wide-short-dark.png"))
+        model.updateSettings { $0.panelPinned = true }
+        try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-panel-pinned.png"))
+        model.updateSettings { $0.panelPinned = false }
+        let railChrome = PanelChromeModel()
+        railChrome.state = .retracted(.right)
+        try render(view: PanelRootView(model: model, chrome: railChrome), size: PanelGeometryPolicy.railSize, appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-edge-rail.png"))
         model.selectedItemIDs = Set(model.visibleItems().prefix(2).map(\.id))
         model.publishReceipt(Receipt(message: "2 items copied", symbol: "doc.on.doc.fill"))
         try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-batch-receipt.png"))
@@ -57,6 +63,7 @@ enum PreviewRenderer {
         window.isOpaque = false
         window.backgroundColor = .clear
         let hosting = NSHostingView(rootView: view)
+        hosting.sizingOptions = []
         hosting.frame = NSRect(origin: .zero, size: size)
         window.contentView = hosting
         window.layoutIfNeeded()

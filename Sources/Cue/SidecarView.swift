@@ -211,6 +211,8 @@ struct SidecarView: View {
                     .accessibilityLabel(searchExpanded ? "Hide Search" : "Show Search")
                 }
 
+                PanelPinToggle(model: model)
+
                 if compactWidth {
                     Menu {
                         Button(model.showingArchive ? "Show active queue" : "Open Archive") {
@@ -555,7 +557,7 @@ struct SidecarView: View {
         panel.title = "Create Cue Workspace"
         panel.nameFieldStringValue = "Cue Workspace.cue"
         panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
-        if panel.runModal() == .OK, let url = panel.url {
+        if panel.runModalForCue() == .OK, let url = panel.url {
             model.createWorkspace(title: url.deletingPathExtension().lastPathComponent, at: url)
         }
     }
@@ -568,7 +570,7 @@ struct SidecarView: View {
         panel.canChooseFiles = true
         panel.treatsFilePackagesAsDirectories = false
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
+        if panel.runModalForCue() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
     }
 }
 
@@ -579,6 +581,10 @@ private struct OnboardingView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: compact ? 13 : 18) {
+            HStack {
+                Spacer()
+                PanelPinToggle(model: model)
+            }
             Spacer()
             ZStack {
                 RoundedRectangle(cornerRadius: 14).fill(Color.accentColor.opacity(0.12))
@@ -614,7 +620,7 @@ private struct OnboardingView: View {
                     panel.canChooseDirectories = true
                     panel.canChooseFiles = true
                     panel.treatsFilePackagesAsDirectories = false
-                    if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
+                    if panel.runModalForCue() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
                 } label: {
                     Label("Open an existing Cue workspace", systemImage: "folder")
                         .frame(maxWidth: .infinity)
@@ -633,6 +639,30 @@ private struct OnboardingView: View {
             }
             .padding(compact ? 16 : 24)
         }
+    }
+}
+
+private struct PanelPinToggle: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        Toggle(isOn: Binding(
+            get: { model.settings.panelPinned },
+            set: { pinned in model.updateSettings { $0.panelPinned = pinned } }
+        )) {
+            Image(systemName: model.settings.panelPinned ? "pin.fill" : "pin")
+                .frame(width: 28, height: 28)
+                .foregroundStyle(model.settings.panelPinned ? Color.accentColor : Color.primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(model.settings.panelPinned ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                )
+        }
+        .toggleStyle(.button)
+        .buttonStyle(.plain)
+        .help("When off, Cue retracts at the screen edge after you move away.")
+        .accessibilityLabel("Keep Cue panel open")
+        .accessibilityValue(model.settings.panelPinned ? "On" : "Off")
     }
 }
 

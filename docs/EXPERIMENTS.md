@@ -153,6 +153,48 @@ not prove a process-wide shortcut or a real status-bar click:
 - Left-click the Cue menu-bar icon to toggle the sidecar; right-click it to open
   the command/privacy menu. Confirm **Quit Cue** exits the process cleanly.
 
+## Edge retract and Panel Pin probes
+
+Use the packaged app and keep a text editor visible beside it. These are real
+window-server probes; deterministic checks cover the state and geometry policy,
+but cannot prove focus, Dock, Stage Manager, or physical display behavior.
+
+1. Turn **Keep Cue panel open** off in the header. Click the editor, move away
+   from Cue, and wait about one second. Cue should become a visible 22×88 handle
+   on a horizontal screen edge. Hover the handle: Cue should expand without the
+   editor losing focus or its selection changing. Move away again and confirm
+   the short exit delay is long enough to cross any edge inset without flicker.
+2. Type an unfinished composer draft, then click the editor and let Cue retract.
+   Hover or click the handle. The draft, list selection, and scroll position must
+   survive; a hover reveal must not place a caret or steal keyboard input.
+3. Resize expanded Cue to 352×500, then to 560×900. Retract and reveal after
+   each size. The exact expanded size should return, content must not clip, and
+   the compact header must keep its Panel Pin control visible.
+4. Toggle Panel Pin on: Cue must remain expanded after leaving it. Toggle it off:
+   Cue must not collapse immediately; it should retract only after a later safe
+   disengagement. Separately verify **Pin item** changes queue ordering only and
+   **Keep Cue above other windows** changes window level only.
+5. Press Escape, use the global show/hide chord, and click the menu-bar item while
+   Cue is expanded and while it is a rail. Each route should have one stable
+   result: Escape hides; status/hotkey explicitly expands a rail; Composer opens
+   expanded and focused. Rapidly repeat retract/reveal 20 times and look for
+   frame drift, stuck transparency, stale animation, or an unreachable handle.
+6. Quit and relaunch with `--show`. Cue should restore only the last expanded
+   position and size—not a 22×88 rail frame—and `--show` should explicitly open
+   it. Turn Reduce Motion on and repeat; frames should change immediately with
+   the same state semantics.
+7. With Dock or Stage Manager on each side, verify Cue prefers the unobstructed
+   horizontal edge. Enter a full-screen Space and verify the handle remains
+   reachable without moving Cue to another Space.
+8. On two displays, test negative-origin, side-by-side and vertically stacked
+   arrangements. Place most of Cue on each display in turn, retract it, then
+   disconnect that display while expanded and while retracted. Cue must repair
+   to the remaining visible frame, choose a reachable rail, and never persist or
+   expose a full panel body across a shared seam.
+
+Record unavailable display, Dock, Stage Manager, or full-screen configurations
+as untested rather than treating deterministic geometry checks as hardware proof.
+
 ## Evidence to keep
 
 For a reviewable experiment, retain:

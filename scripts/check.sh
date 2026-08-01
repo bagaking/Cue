@@ -11,6 +11,8 @@ swiftc \
   -swift-version 5 \
   -o .build/checks/CueCoreChecks \
   Sources/Cue/Models.swift \
+  Sources/Cue/PanelPresentation.swift \
+  Sources/Cue/SettingsStore.swift \
   Sources/Cue/ContentHasher.swift \
   Sources/Cue/MarkdownWorkspaceCodec.swift \
   Sources/Cue/WorkspacePackageCodec.swift \

@@ -93,7 +93,12 @@ private struct GeneralSettings: View {
                     }
                 }
             ))
-            Toggle("Keep the sidecar above other windows", isOn: binding(\.keepPanelOnTop))
+            Toggle("Keep Cue panel open", isOn: binding(\.panelPinned))
+            Text("When off, Cue retracts to a small screen-edge handle after you move away.")
+                .settingsHint()
+            Toggle("Keep Cue above other windows", isOn: binding(\.keepPanelOnTop))
+            Text("This changes window level only; it does not pin the panel open or pin queue items.")
+                .settingsHint()
             Toggle("Use a more opaque surface", isOn: binding(\.reduceTranslucency))
             Toggle("Complete items when copied", isOn: binding(\.completeOnCopy))
             Text("Copy is explicit but completion stays separate by default. When enabled, every copy marks its items complete immediately.")
@@ -333,7 +338,7 @@ private struct WorkspaceSettings: View {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "cue") ?? .package]
         panel.nameFieldStringValue = "Cue Workspace.cue"
-        if panel.runModal() == .OK, let url = panel.url { model.createWorkspace(title: url.deletingPathExtension().lastPathComponent, at: url) }
+        if panel.runModalForCue() == .OK, let url = panel.url { model.createWorkspace(title: url.deletingPathExtension().lastPathComponent, at: url) }
     }
 
     private func openWorkspace() {
@@ -342,7 +347,7 @@ private struct WorkspaceSettings: View {
         panel.canChooseDirectories = true
         panel.canChooseFiles = true
         panel.treatsFilePackagesAsDirectories = false
-        if panel.runModal() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
+        if panel.runModalForCue() == .OK, let url = panel.url { model.addExistingWorkspace(url: url) }
     }
 }
 

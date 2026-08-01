@@ -49,6 +49,7 @@ final class CueApplicationDelegate: NSObject, NSApplicationDelegate {
         settingsSubscription = model.$settings
             .sink { [weak self] settings in
                 self?.panelController?.setFloating(settings.keepPanelOnTop)
+                self?.panelController?.setPanelPinned(settings.panelPinned)
                 self?.applyHotKeys(settings)
         }
         applyHotKeys(model.settings)

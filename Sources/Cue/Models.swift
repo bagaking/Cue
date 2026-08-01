@@ -198,6 +198,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         "com.agilebits.onepassword7",
     ]
     var contextMappings: [ContextMapping] = []
+    var panelPinned = false
     var keepPanelOnTop = true
     var showInDock = false
     var panelSide = "right"

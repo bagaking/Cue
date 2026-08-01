@@ -201,11 +201,206 @@ private func checkDuplicatePolicy() {
     check(CapturePolicy.duplicate(body: body, now: now.addingTimeInterval(4), items: [item], windowSeconds: 2) == nil, "old capture does not suppress")
 }
 
+private func effectToken(
+    _ effects: [PanelPresentationEffect],
+    matching predicate: (PanelPresentationEffect) -> Int?
+) -> Int? {
+    effects.compactMap(predicate).first
+}
+
+private func checkPanelPresentation() {
+    var machine = PanelPresentationMachine()
+    let explicit = machine.handle(.show(reason: .explicit))
+    check(machine.state == .expanded, "explicit show enters expanded presentation")
+    check(explicit.contains(.presentExpanded(reason: .explicit)) && PanelRevealReason.explicit.allowsFocus, "explicit reveal is the focus-capable contract")
+
+    let firstExit = machine.handle(.hoverExited)
+    let firstRetractToken = effectToken(firstExit) { effect in
+        if case let .scheduleRetraction(token) = effect { return token }
+        return nil
+    }!
+    _ = machine.handle(.hoverEntered)
+    let staleRetract = machine.handle(.retractDeadline(token: firstRetractToken, edge: .right))
+    check(machine.state == .expanded && staleRetract.isEmpty, "re-enter invalidates a stale retract deadline")
+
+    let secondExit = machine.handle(.hoverExited)
+    let retractToken = effectToken(secondExit) { effect in
+        if case let .scheduleRetraction(token) = effect { return token }
+        return nil
+    }!
+    let retract = machine.handle(.retractDeadline(token: retractToken, edge: .right))
+    check(machine.state == .retracted(.right) && retract.contains(.presentRetracted), "valid exit deadline retracts to its derived edge")
+
+    let firstEnter = machine.handle(.hoverEntered)
+    let staleHoverToken = effectToken(firstEnter) { effect in
+        if case let .scheduleHoverReveal(token) = effect { return token }
+        return nil
+    }!
+    _ = machine.handle(.hoverExited)
+    let staleHover = machine.handle(.hoverRevealDeadline(token: staleHoverToken))
+    check(machine.state == .retracted(.right) && staleHover.isEmpty, "rail exit invalidates a stale hover reveal")
+
+    let secondEnter = machine.handle(.hoverEntered)
+    let hoverToken = effectToken(secondEnter) { effect in
+        if case let .scheduleHoverReveal(token) = effect { return token }
+        return nil
+    }!
+    let hoverReveal = machine.handle(.hoverRevealDeadline(token: hoverToken))
+    check(machine.state == .expanded && hoverReveal.contains(.presentExpanded(reason: .hover)), "bounded rail hover reveals the panel")
+    check(!PanelRevealReason.hover.allowsFocus, "hover reveal cannot request focus")
+    check(PanelRevealReason.hover.usesTemporaryFloatingLevel && !PanelRevealReason.pin.usesTemporaryFloatingLevel, "only hover preview receives a temporary reachability level")
+
+    let pinExit = machine.handle(.hoverExited)
+    let pinDeadline = effectToken(pinExit) { effect in
+        if case let .scheduleRetraction(token) = effect { return token }
+        return nil
+    }!
+    _ = machine.handle(.retractDeadline(token: pinDeadline, edge: .left))
+    let pinEffects = machine.handle(.setPinned(true))
+    check(machine.state == .expanded && pinEffects.contains(.presentExpanded(reason: .pin)), "Panel Pin forces a visible rail expanded and cancels work")
+    let unpinEffects = machine.handle(.setPinned(false))
+    check(machine.state == .expanded && !unpinEffects.contains(where: { if case .scheduleRetraction = $0 { return true }; return false }), "unpin does not instantly retract")
+
+    let escapeExit = machine.handle(.hoverExited)
+    let escapeToken = effectToken(escapeExit) { effect in
+        if case let .scheduleRetraction(token) = effect { return token }
+        return nil
+    }!
+    _ = machine.handle(.hide)
+    _ = machine.handle(.retractDeadline(token: escapeToken, edge: .left))
+    check(machine.state == .hidden, "Escape or close invalidates older presentation callbacks")
+
+    _ = machine.handle(.toggle)
+    check(machine.state == .expanded, "status or hotkey toggle explicitly expands hidden Cue")
+    let toggleExit = machine.handle(.hoverExited)
+    let toggleToken = effectToken(toggleExit) { effect in
+        if case let .scheduleRetraction(token) = effect { return token }
+        return nil
+    }!
+    _ = machine.handle(.retractDeadline(token: toggleToken, edge: .right))
+    let railToggle = machine.handle(.toggle)
+    check(machine.state == .expanded && railToggle.contains(.presentExpanded(reason: .explicit)), "status or hotkey toggle explicitly expands a rail")
+
+    for _ in 0..<20 {
+        let exit = machine.handle(.hoverExited)
+        let token = effectToken(exit) { effect in
+            if case let .scheduleRetraction(token) = effect { return token }
+            return nil
+        }!
+        _ = machine.handle(.retractDeadline(token: token, edge: .right))
+        let enter = machine.handle(.hoverEntered)
+        let hover = effectToken(enter) { effect in
+            if case let .scheduleHoverReveal(token) = effect { return token }
+            return nil
+        }!
+        _ = machine.handle(.hoverRevealDeadline(token: hover))
+    }
+    check(machine.state == .expanded, "20 retract and reveal cycles finish without state drift")
+}
+
+private func checkPanelGeometry() {
+    let left = PanelScreenGeometry(
+        id: "left",
+        frame: CGRect(x: -1440, y: 0, width: 1440, height: 900),
+        visibleFrame: CGRect(x: -1440, y: 0, width: 1440, height: 875)
+    )
+    let main = PanelScreenGeometry(
+        id: "main",
+        frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+        visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 875)
+    )
+    let mostlyLeft = CGRect(x: -300, y: 180, width: 500, height: 600)
+    check(PanelGeometryPolicy.ownerScreenIndex(for: mostlyLeft, screens: [left, main]) == 0, "owner screen uses greatest physical overlap across a negative origin")
+
+    let mainExpanded = CGRect(x: 24, y: 140, width: 372, height: 600)
+    let sharedPlacement = PanelGeometryPolicy.railPlacement(for: mainExpanded, screens: [left, main])
+    check(sharedPlacement?.screenID == "main" && sharedPlacement?.edge == .right && sharedPlacement?.isPhysicalOuterEdge == true, "shared horizontal seam prefers the true outer edge")
+    if let sharedPlacement {
+        let totalVisibleArea = [left, main].reduce(CGFloat.zero) { partial, screen in
+            let intersection = sharedPlacement.frame.intersection(screen.frame)
+            return partial + (intersection.isNull ? 0 : intersection.width * intersection.height)
+        }
+        check(totalVisibleArea == sharedPlacement.frame.width * sharedPlacement.frame.height, "compact rail intersects displays only by its own area")
+    }
+
+    let docked = PanelScreenGeometry(
+        id: "dock",
+        frame: CGRect(x: 0, y: 0, width: 1440, height: 900),
+        visibleFrame: CGRect(x: 82, y: 0, width: 1358, height: 875)
+    )
+    check(PanelGeometryPolicy.railPlacement(for: mainExpanded, screens: [docked])?.edge == .right, "rail avoids a Dock or Stage Manager side inset when the other edge is clear")
+
+    let upper = PanelScreenGeometry(
+        id: "upper",
+        frame: CGRect(x: 0, y: 900, width: 1440, height: 900),
+        visibleFrame: CGRect(x: 0, y: 900, width: 1440, height: 875)
+    )
+    let upperFrame = CGRect(x: 900, y: 1040, width: 420, height: 620)
+    check(PanelGeometryPolicy.ownerScreenIndex(for: upperFrame, screens: [main, upper]) == 1, "vertical display layouts choose the screen containing the panel")
+
+    let oversized = CGRect(x: 3000, y: -200, width: 900, height: 1200)
+    let repaired = PanelGeometryPolicy.repairExpandedFrame(oversized, screens: [main])
+    check(repaired?.width == 560 && repaired?.height == 859, "screen repair clamps expanded size to configured and visible limits")
+    check(repaired.map { main.visibleFrame.insetBy(dx: 8, dy: 8).contains($0) } == true, "screen removal repairs expanded geometry into the remaining visible frame")
+
+    let minimum = CGRect(x: 100, y: 100, width: 100, height: 100)
+    let minimumRepair = PanelGeometryPolicy.repairExpandedFrame(minimum, screens: [main])
+    check(minimumRepair?.size == PanelGeometryPolicy.minimumExpandedSize, "expanded geometry enforces the 352 by 500 minimum")
+
+    let stable = CGRect(x: 900, y: 120, width: 420, height: 620)
+    let stableRepair = PanelGeometryPolicy.repairExpandedFrame(stable, screens: [main])
+    let stableRail = PanelGeometryPolicy.railPlacement(for: stable, screens: [main])?.frame
+    check(stableRepair == stable, "deriving a rail leaves canonical expanded size and position unchanged")
+    check((0..<20).allSatisfy { _ in PanelGeometryPolicy.railPlacement(for: stable, screens: [main])?.frame == stableRail }, "20 geometry derivations are deterministic and drift-free")
+
+    let tiny = PanelScreenGeometry(id: "tiny", frame: CGRect(x: 0, y: 0, width: 30, height: 40), visibleFrame: CGRect(x: 0, y: 0, width: 30, height: 40))
+    check(PanelGeometryPolicy.railPlacement(for: stable, screens: [tiny]) == nil, "no usable rail geometry safely keeps Cue expanded")
+}
+
+private func checkPanelSettings() {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("CuePanelSettings-\(UUID())", isDirectory: true)
+    let store = SettingsStore(directoryURL: root)
+    do {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let oldJSON = """
+        {
+          "captureSourceApp" : true,
+          "keepPanelOnTop" : false,
+          "showInDock" : false,
+          "workspaces" : []
+        }
+        """
+        try Data(oldJSON.utf8).write(to: store.settingsURL, options: .atomic)
+        let forwardFilled = store.load()
+        check(forwardFilled.panelPinned == false && forwardFilled.keepPanelOnTop == false, "old settings JSON forward-fills Panel Pin as off")
+
+        var settings = forwardFilled
+        settings.panelPinned = true
+        settings.keepPanelOnTop = false
+        try store.save(settings)
+        let roundTrip = store.load()
+        check(roundTrip.panelPinned && !roundTrip.keepPanelOnTop, "Panel Pin round-trips independently from Always on Top")
+
+        var item = WorkItem(body: "Pinned item", kind: .prompt, sectionID: UUID(), contentHash: "hash", pinned: true, order: 0)
+        settings.panelPinned = false
+        check(item.pinned && !settings.panelPinned, "WorkItem Pin is independent from Panel Pin")
+        item.pinned = false
+        settings.panelPinned = true
+        check(!item.pinned && settings.panelPinned, "Panel Pin never mutates WorkItem metadata")
+    } catch {
+        failed += 1
+        print("FAIL  Panel settings: \(error)")
+    }
+}
+
 checkModifierTapDetector()
 checkSelectionModel()
 checkMarkdown()
 checkStorage()
 checkDuplicatePolicy()
+checkPanelPresentation()
+checkPanelGeometry()
+checkPanelSettings()
 
 print("\nCue core checks: \(passed) passed, \(failed) failed")
 if failed > 0 { exit(1) }
