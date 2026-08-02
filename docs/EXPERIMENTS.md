@@ -12,10 +12,9 @@ Requirements:
 - Apple Swift toolchain 5.10 or newer
 - Accessibility permission only for the selected-text experiment
 
-Build, check, and package the exact app under test:
+From the repository root, build, check, and package the exact app under test:
 
 ```bash
-cd /Users/bytedance/proj/priv/bagaking/Cue
 sh scripts/check.sh
 sh scripts/package_app.sh
 dist/Cue.app/Contents/MacOS/Cue --show
@@ -47,7 +46,7 @@ the `.cue/items/YYYY/MM/` tree contains one readable Markdown document for the i
 3. Run:
 
    ```bash
-   /Users/bytedance/proj/priv/bagaking/Cue/dist/Cue.app/Contents/MacOS/Cue --capture-selection
+   dist/Cue.app/Contents/MacOS/Cue --capture-selection
    ```
 
 4. Return focus to TextEdit before the two-second countdown ends.

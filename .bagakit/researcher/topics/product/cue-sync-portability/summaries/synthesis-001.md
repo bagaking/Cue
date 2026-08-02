@@ -44,9 +44,15 @@ Evidence-backed product and architecture decisions for Copper-derived demand, cu
 - No dual-Mac offline conflict qualification has been run, so Cue must not claim reliable Mac-to-Mac sync.
 - Window privacy mapping, Finder drag terminal behavior and attachment crash recovery remain implementation gates.
 
-## Next Action
+## Downstream Disposition
 
-Update Feature f-222j2ekp8 proposal from claims c001 through c014, then replan storage transaction work before capture and transfer UI.
+- Claims c001 through c014 were consumed by Feature f-222j2ekp8 proposal and
+  reviewed task-plan revision 2.
+- The resulting order is storage transaction and codec first, then attachment
+  closure, capture, transfer UI, and qualification.
+- Implementation and delivery status remain owned by the Feature receipt,
+  state, and tasks; this research synthesis does not claim those capabilities
+  have shipped.
 
 ## Track Evidence Coverage
 

@@ -4,6 +4,12 @@ Cue is a quiet, native macOS work queue for the fragments and prompts you want t
 
 It combines intentional selected-text capture, typed future prompts, explicit completion, batch copy, merge, Archive, and human-readable local workspace packages in one compact sidecar. Cue does not run an account service, upload note content, passively record clipboard or screen history, or inject text into other apps.
 
+This README describes the shipped text-first product. Screenshot attachments,
+the `cue` CLI, reliable Mac-to-Mac sync, a sync-provider choice, and an iPhone
+client are researched or planned work—not current capabilities. Their live
+status belongs to the foreground Goal and Feature under `.bagakit/`, not to
+roadmap prose.
+
 ## Requirements
 
 - macOS 14 or newer
@@ -40,9 +46,12 @@ dist/Cue.app/Contents/MacOS/Cue --capture-selection
 - Settings live in `~/Library/Application Support/Cue/settings.json`.
 - Rebuildable search indexes live under `~/Library/Caches/Cue/WorkspaceIndex/`; they are never source of truth.
 - Timestamped package backups live beside the workspace in `.cue-backups/`.
-- Changed package files use sibling temporary files, `fsync`, parse validation, and atomic replacement; the manifest is committed last.
+- The current schema-2 writer protects each changed file with sibling temporary files, `fsync`, parse validation, and atomic replacement, then commits the manifest last. This is not yet a coordinated old-or-new package transaction; schema 3 owns that planned migration.
 - External edits stop writes and surface Reload / Save Copy / safe three-way Merge choices. Non-overlapping item and section changes can be previewed together; same-object conflicts stop without touching the external package.
 
 See [docs/PRODUCT.md](docs/PRODUCT.md) for commands, trust boundaries, and acceptance criteria.
 See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) for a five-minute smoke test,
 Copper-versus-Cue comparison protocol, and trust-boundary probes.
+
+Agents and contributors should start with [AGENTS.md](AGENTS.md), then use
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) as the stable code and truth map.

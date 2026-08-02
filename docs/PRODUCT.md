@@ -37,11 +37,11 @@ Every selected fragment and typed prompt is a `WorkItem` with one lifecycle: que
 ## Storage and recovery
 
 - `.cue` workspace packages remain editable outside Cue; each WorkItem body lives in its own Markdown document.
-- Cue fingerprints all source files in the loaded package and refuses silent last-write-wins behavior.
+- Cue fingerprints package files and rejects a write when it detects a change before the schema-2 precondition check. That check is not coordinated with the later multi-file write, so concurrent writers can still race; schema 3 owns complete snapshot/CAS protection.
 - A failed write keeps the exact intended document state plus a readable Markdown recovery export; later mutations are paused so they cannot replace it.
 - Recovery offers exact Copy, a complete conflict-copy package, and a previewed three-way merge. Only non-overlapping object changes merge automatically; same-object conflicts stop.
 - A timestamped package backup is made before changing an existing workspace; at least the latest ten are retained.
-- Tombstones make physical deletion syncable. The local search index is rebuildable and never authoritative.
+- Tombstones make physical deletion representable outside the app. The current timestamp form has not passed dual-Mac conflict qualification and does not by itself make Cue a reliable sync product. The local search index is rebuildable and never authoritative.
 - Merge archives originals with provenance and can be undone as one snapshot.
 
 ## Responsive window contract

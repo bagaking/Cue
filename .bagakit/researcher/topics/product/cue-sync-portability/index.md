@@ -18,23 +18,20 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 
 ## Current Read Order
 
-1. `charter.md` and `surveys/` when present
-2. `passes/` and `tracks/` when present
-3. `summaries/`
-4. preserved source cards under `originals/`
-5. update this index after every meaningful research pass
-
-## Source Cards
-- none yet
-
-## Summaries
-- none yet
+1. `summaries/synthesis-001.md`
+2. `claims.md` and the five records under `insights/`
+3. `charter.md`, `surveys/`, `passes/`, and `tracks/`
+4. source-bound records under `summaries/`
+5. preserved source cards under `originals/`
 
 ## Remaining Gaps
 
-- add or refine source cards
-- add or refine reusable summaries
-- update the reading order when the topic changes
+- No dual-Mac offline conflict qualification exists; reliable Mac-to-Mac sync
+  remains an unproven capability.
+- Provider selection and iPhone implementation remain open because retained
+  evidence does not yet justify either choice.
+- Window privacy mapping, Finder drag termination, and crash-safe attachment
+  recovery remain implementation gates rather than completed research claims.
 
 <!-- BAGAKIT:RESEARCHER:SOURCE-CARDS:START -->
 ## Source Cards
