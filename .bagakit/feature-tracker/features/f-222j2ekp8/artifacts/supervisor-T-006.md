@@ -3,7 +3,7 @@
 ## Execution contract
 
 - owner: `f-222j2ekp8/T-006`
-- integration writer: `/root/t006_writer`; all other agents are read-only
+- integration writer: `/root/t006_writer_recovery`; all other agents are read-only
 - mutation root: current tree on `main`
 - protected baseline: Cue 0.2.0 schema-2 packages remain readable and are
   migrated only by a verified schema-3 write
@@ -36,25 +36,31 @@
 
 ## HANDOFF_READY
 
-- HEAD/upstream at writer assignment: `b3fa432`, `main == origin/main`
-- worktree at writer assignment: clean
-- Tracker: T-006 remains `in_progress`; no implementation commit exists
-- integration writer: `/root/t006_writer`; principle, transaction, migration,
+- HEAD/upstream at recovery-writer assignment: `e07cb07`, `main == origin/main`
+- worktree at recovery-writer assignment: B1 codec/tests and this supervisor
+  packet were dirty, with an empty staged index
+- Tracker: T-006 remains `in_progress`; Slice B1 is not yet committed, and
+  T-006 commit plus finish evidence is not yet recorded
+- integration writer: `/root/t006_writer_recovery`; ownership transferred from
+  `/root/t006_writer` solely because transient provider authentication failures
+  prevented that agent from continuing; principle, transaction, migration,
   codec, and final reviewers remain read-only
 - active side effects at recovery: one process from
   `dist/Cue.app/Contents/MacOS/Cue` was already alive as PID 43717; the writer
   did not start, package, relaunch, or reset permissions
-- implementation: Slice A extraction is complete in the worktree and awaiting
-  commit; schema behavior remains version 2
+- implementation: Slice A is pushed as `e07cb07`; Slice B1 adds the public
+  lossless `CueItemRecordCodec` without activating schema 3 in
+  `WorkspaceStore`, so live package behavior remains schema 2
 - passed evidence: Tracker validation and Goal fresh-executor check; prior
   0.2.0 baseline passed 92 Core and 63 AppKit checks before T-006 started;
   Researcher pass 002's standalone macOS process probe observed pre-publish
   live-old plus staged-new, post-publish live-new plus retained backup-old, and
   exactly one winner for two coordinated writers using the same expected
-  generation; Slice A warnings-as-errors build and 91 Core plus 66 AppKit
-  integration checks pass
-- not run: every T-006-specific codec, migration, concurrency, failpoint,
-  package, and runtime gate
+  generation; Slice B1 warnings-as-errors, 119 Core checks, 66 AppKit
+  integration checks, Tracker validation, and independent adversarial codec
+  review pass
+- not run: schema-3 inventory/migration planning, coordinated snapshot/CAS,
+  publication failpoints, package activation, and runtime qualification
 
 ## Architecture handoff
 
@@ -113,13 +119,13 @@
 ## Next owner action
 
 1. The truth-alignment slice is pushed as `9bdca1e` on `origin/main`.
-2. Review and commit the minimal UI-framework-free `CueCore` extraction under
-   `Sources/CueCore/`; legacy aggregate Markdown and derived search cache stay
-   under `Sources/Cue/`, and the executable plus checks consume the sole Core
-   package writer.
-3. Land the shared lossless record/schema codec, then the coordinated
-   transaction, then snapshot-based AppModel recovery/Undo in separate
-   rollback-sized behavior closures.
+2. The minimal UI-framework-free `CueCore` extraction is pushed as `e07cb07`;
+   legacy aggregate Markdown and derived search cache remain app-side, and the
+   executable plus checks consume the sole Core package writer.
+3. Slice B1 lands the public lossless record codec as one rollback boundary;
+   next land schema-3 inventory/tombstone/migration planning as Slice B2, then
+   coordinated transaction and snapshot-based AppModel recovery/Undo in
+   separate behavior closures.
 4. Keep transaction, migration/codec, privacy/runtime, and final adversarial
    reviewers read-only; correct root causes before each commit.
 5. Do not start T-007 attachments until Tracker has recorded T-006 gate,

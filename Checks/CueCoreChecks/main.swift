@@ -113,6 +113,121 @@ private func checkMarkdown() {
     }
 }
 
+private func checkItemRecordCodec() {
+    func expectInvalid(_ data: Data, _ message: String) {
+        do {
+            _ = try CueItemRecordCodec.decode(data)
+            check(false, message)
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, message)
+        } catch {
+            check(false, "\(message) (unexpected error: \(error))")
+        }
+    }
+
+    do {
+        let document = sampleDocument()
+        let item = document.items[0]
+        let fresh = CueItemRecord(workspaceID: document.id, item: item)
+        let canonical = try CueItemRecordCodec.encode(fresh)
+        check(try CueItemRecordCodec.encode(fresh) == canonical, "fresh cue.md encoding is deterministic")
+        let canonicalDecoded = try CueItemRecordCodec.decode(canonical)
+        check(canonicalDecoded.workspaceID == document.id && canonicalDecoded.item.body == item.body, "shared cue.md codec round-trips a fresh record")
+        check(try CueItemRecordCodec.encode(canonicalDecoded) == canonical, "unchanged cue.md record bytes round-trip exactly")
+
+        let canonicalString = String(data: canonical, encoding: .utf8)!
+        var nilOptionalItem = item
+        nilOptionalItem.completedAt = nil
+        nilOptionalItem.archivedAt = nil
+        nilOptionalItem.mergedInto = nil
+        nilOptionalItem.source = .none
+        let nilOptionalString = String(
+            data: try CueItemRecordCodec.encode(CueItemRecord(workspaceID: document.id, item: nilOptionalItem)),
+            encoding: .utf8
+        )!
+        check(nilOptionalString.contains(#""archived_at":null"#) && nilOptionalString.contains(#""completed_at":null"#) && nilOptionalString.contains(#""merged_into":null"#), "fresh cue.md records emit absent optional known fields explicitly as null")
+        check(nilOptionalString.contains(#""appName":null"#) && nilOptionalString.contains(#""bundleIdentifier":null"#) && nilOptionalString.contains(#""windowTitle":null"#) && nilOptionalString.contains(#""url":null"#), "fresh cue.md source metadata emits absent optional known fields explicitly as null")
+        let cueLine = canonicalString.split(separator: "\n", omittingEmptySubsequences: false)
+            .first(where: { $0.hasPrefix("cue: ") })!
+        let canonicalObject = String(cueLine.dropFirst("cue: ".count))
+        let unknownMember = #", "future" : { "nested" : [1, { "glyph" : "\u0065\u0301" }] }"#
+        let nestedUnknownMember = #" "future_context" : { "escaped" : "\u0065\u0301", "array" : [1, 2] } ,"#
+        let sourceOpening = #""source":{"#
+        let objectWithNestedUnknown = canonicalObject.replacingOccurrences(
+            of: sourceOpening,
+            with: sourceOpening + nestedUnknownMember
+        )
+        let customObject = String(objectWithNestedUnknown.dropLast()) + unknownMember + "}"
+        let prefix = "---\r\n# frontmatter comment\r\ntitle: External title\r\ncue: "
+        let suffix = "   \r\ntags: [one, two] # keep\r\n\r\n---\r\n"
+        let body = "\r\n  leading\r\nNUL:\0\ndecomposed: e\u{0301}\nno final newline"
+        let custom = Data((prefix + customObject + suffix + body).utf8)
+        let decoded = try CueItemRecordCodec.decode(custom)
+        check(try CueItemRecordCodec.encode(decoded) == custom, "cue.md preserves CRLF frontmatter, comments, unknown Cue bytes, and body bytes")
+
+        var metadataEdit = decoded
+        metadataEdit.item.pinned.toggle()
+        let metadataEdited = try CueItemRecordCodec.encode(metadataEdit)
+        check(metadataEdited.starts(with: Data(prefix.utf8)), "known metadata edits preserve non-Cue frontmatter prefix bytes")
+        check(metadataEdited.range(of: Data(unknownMember.utf8)) != nil, "known metadata edits preserve unknown Cue member bytes and order")
+        check(metadataEdited.range(of: Data(nestedUnknownMember.utf8)) != nil, "known metadata edits preserve nested unknown Cue member bytes and order")
+        let originalBodyData = Data(body.utf8)
+        check(metadataEdited.range(of: Data(suffix.utf8)) != nil && metadataEdited.suffix(originalBodyData.count) == originalBodyData, "known metadata edits preserve frontmatter suffix and unchanged body bytes")
+
+        var bodyEdit = decoded
+        bodyEdit.item.body = "replacement body\r\nwithout final LF"
+        let bodyEdited = try CueItemRecordCodec.encode(bodyEdit)
+        let originalFrontmatter = Data((prefix + customObject + suffix).utf8)
+        check(bodyEdited.starts(with: originalFrontmatter), "body-only edits preserve the complete frontmatter byte slice")
+        let editedBodyData = Data(bodyEdit.item.body.utf8)
+        check(bodyEdited.suffix(editedBodyData.count) == editedBodyData, "body-only edits write exactly the requested UTF-8 body bytes")
+
+        let composedBody = "\r\n  leading\r\nNUL:\0\ndecomposed: \u{00E9}\nno final newline"
+        var normalizationEdit = decoded
+        normalizationEdit.item.body = composedBody
+        let normalizationEdited = try CueItemRecordCodec.encode(normalizationEdit)
+        check(normalizationEdited.suffix(Data(composedBody.utf8).count) == Data(composedBody.utf8), "canonically equivalent body edits still write the requested UTF-8 bytes")
+        var normalizationAndMetadataEdit = normalizationEdit
+        normalizationAndMetadataEdit.item.pinned.toggle()
+        let normalizationAndMetadataEdited = try CueItemRecordCodec.encode(normalizationAndMetadataEdit)
+        check(normalizationAndMetadataEdited.suffix(Data(composedBody.utf8).count) == Data(composedBody.utf8), "metadata edits cannot restore canonically equivalent original body bytes")
+
+        expectInvalid(Data("---\nname: no cue key\n---\nbody".utf8), "cue.md without a top-level cue key is rejected")
+        let duplicateCue = Data((prefix + customObject + "\r\ncue: " + customObject + suffix + body).utf8)
+        expectInvalid(duplicateCue, "cue.md with duplicate top-level cue keys is rejected")
+
+        let duplicateKnown = customObject.replacingOccurrences(of: "{", with: "{\"id\":\"\(item.id.uuidString)\",", options: [], range: customObject.startIndex..<customObject.index(after: customObject.startIndex))
+        expectInvalid(Data((prefix + duplicateKnown + suffix + body).utf8), "cue.md with duplicate Cue JSON members is rejected")
+
+        let duplicateManagedNested = customObject.replacingOccurrences(
+            of: sourceOpening,
+            with: sourceOpening + #""appName":"duplicate","#
+        )
+        expectInvalid(Data((prefix + duplicateManagedNested + suffix + body).utf8), "cue.md with duplicate managed nested Cue members is rejected")
+        let duplicateUnknownNested = String(canonicalObject.dropLast()) + #", "future_duplicate" : {"same":1,"same":2}}"#
+        expectInvalid(Data((prefix + duplicateUnknownNested + suffix + body).utf8), "cue.md with duplicate unknown nested Cue members is rejected")
+
+        expectInvalid(Data(("---\n  cue: " + canonicalObject + "\n---\nbody").utf8), "indented cue substitutes are rejected")
+        expectInvalid(Data(("---\n\"cue\": " + canonicalObject + "\n---\nbody").utf8), "quoted cue substitutes are rejected")
+        expectInvalid(Data("---\ncue: true\n---\nbody".utf8), "non-object cue values are rejected")
+        expectInvalid(Data("---\ncue: {\n  \"schema\": 3\n}\n---\nbody".utf8), "multiline cue objects are rejected")
+        expectInvalid(Data(("---\ncue: " + String(canonicalObject.dropLast()) + ",}\n---\nbody").utf8), "malformed cue JSON is rejected")
+        expectInvalid(Data(("---\ncue: " + canonicalObject + " # comment\n---\nbody").utf8), "inline comments after cue JSON are rejected")
+
+        let missingKnownObject = canonicalObject.replacingOccurrences(of: #""archived_at":null,"#, with: "")
+        expectInvalid(Data(("---\ncue: " + missingKnownObject + "\n---\nbody").utf8), "cue JSON missing a known member is rejected")
+        let missingNestedKnownObject = canonicalObject.replacingOccurrences(of: #""url":null,"#, with: "")
+        expectInvalid(Data(("---\ncue: " + missingNestedKnownObject + "\n---\nbody").utf8), "cue JSON missing a known nested source member is typed invalid")
+
+        var invalidUTF8 = custom
+        invalidUTF8.append(0xFF)
+        expectInvalid(invalidUTF8, "cue.md with invalid UTF-8 is rejected")
+    } catch {
+        failed += 1
+        print("FAIL  shared cue.md codec: \(error)")
+    }
+}
+
 private func checkStorage() {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
     let url = directory.appendingPathComponent("workspace.cue", isDirectory: true)
@@ -487,6 +602,7 @@ private func checkPanelSettings() {
 checkModifierTapDetector()
 checkSelectionModel()
 checkMarkdown()
+checkItemRecordCodec()
 checkStorage()
 checkDuplicatePolicy()
 checkPanelPresentation()
