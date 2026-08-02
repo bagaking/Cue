@@ -11,6 +11,18 @@ private func currentAppKitMouseButtonDown() -> Bool {
     NSEvent.pressedMouseButtons != 0
 }
 
+@MainActor
+private func currentPanelScreenGeometries() -> [PanelScreenGeometry] {
+    NSScreen.screens.enumerated().map { index, screen in
+        let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        return PanelScreenGeometry(
+            id: number?.stringValue ?? "screen-\(index)",
+            frame: screen.frame,
+            visibleFrame: screen.visibleFrame
+        )
+    }
+}
+
 extension Notification.Name {
     static let cueModalInteractionEnded = Notification.Name("CueModalInteractionEnded")
 }
@@ -120,7 +132,9 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private static let retractDelay = 0.68
     private let panel: CuePanel
     private let chrome = PanelChromeModel()
-    private let savedFrameKey = "CuePanelFrame"
+    private let savedFrameKey: String
+    private let notificationCenter: NotificationCenter
+    private let screenGeometryProvider: @MainActor () -> [PanelScreenGeometry]
     private var machine = PanelPresentationMachine()
     private var expandedFrame = NSRect(origin: .zero, size: initialSize)
     private var pendingRailPlacement: PanelRailPlacement?
@@ -149,10 +163,16 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     init(
         model: AppModel,
         pointerLocationProvider: @escaping () -> NSPoint? = currentAppKitPointerLocation,
-        mouseButtonStateProvider: @escaping () -> Bool = currentAppKitMouseButtonDown
+        mouseButtonStateProvider: @escaping () -> Bool = currentAppKitMouseButtonDown,
+        screenGeometryProvider: @escaping @MainActor () -> [PanelScreenGeometry] = currentPanelScreenGeometries,
+        notificationCenter: NotificationCenter = .default,
+        savedFrameKey: String = "CuePanelFrame"
     ) {
         self.pointerLocationProvider = pointerLocationProvider
         self.mouseButtonStateProvider = mouseButtonStateProvider
+        self.screenGeometryProvider = screenGeometryProvider
+        self.notificationCenter = notificationCenter
+        self.savedFrameKey = savedFrameKey
         panel = CuePanel(
             contentRect: NSRect(origin: .zero, size: Self.initialSize),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable, .closable],
@@ -199,43 +219,43 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         chrome.onExplicitReveal = { [weak self] in self?.show() }
 
         _ = process(.setPinned(model.settings.panelPinned))
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(interactionBegan),
             name: NSMenu.didBeginTrackingNotification,
             object: nil
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(interactionEnded),
             name: NSWindow.didEndSheetNotification,
             object: panel
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(interactionEnded),
             name: NSMenu.didEndTrackingNotification,
             object: nil
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(interactionEnded),
             name: .cueModalInteractionEnded,
             object: nil
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(textEditingBegan),
             name: NSText.didBeginEditingNotification,
             object: nil
         )
-        NotificationCenter.default.addObserver(
+        notificationCenter.addObserver(
             self,
             selector: #selector(textEditingEnded),
             name: NSText.didEndEditingNotification,
@@ -252,7 +272,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     deinit {
         pendingWorkItem?.cancel()
         frameAnimationTimer?.invalidate()
-        NotificationCenter.default.removeObserver(self)
+        notificationCenter.removeObserver(self)
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
@@ -820,11 +840,21 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         switch machine.state {
         case .expanded:
             let token = machine.generation
-            let target = lastRevealReason.usesRailAnchor
-                ? PanelGeometryPolicy.railPlacement(for: repaired, screens: screenGeometries).map {
+            let target: NSRect
+            if lastRevealReason.usesRailAnchor {
+                let placement = PanelGeometryPolicy.railPlacement(for: repaired, screens: screenGeometries)
+                // Keep the visible frame and the promotion source on the same
+                // screen snapshot. A missing placement must also clear stale
+                // rail truth rather than reviving an edge from before the
+                // display, Dock, or Stage Manager change.
+                pendingRailPlacement = placement
+                target = placement.map {
                     PanelGeometryPolicy.hoverExpandedFrame(canonicalExpandedFrame: repaired, railPlacement: $0)
                 } ?? repaired
-                : repaired
+            } else {
+                pendingRailPlacement = nil
+                target = repaired
+            }
             transitionFrame(to: target, duration: 0, token: token) { [weak self] in
                 self?.configureExpandedPanel()
                 self?.settlePointerAfterProgrammaticFrame()
@@ -952,7 +982,34 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     func runIntegrationRailClick() {
-        handleExplicitMouseInteraction()
+        let location = NSPoint(x: panel.frame.width / 2, y: panel.frame.height / 2)
+        let timestamp = ProcessInfo.processInfo.systemUptime
+        if let down = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: timestamp,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            eventNumber: 0,
+            clickCount: 1,
+            pressure: 1
+        ) {
+            panel.sendEvent(down)
+        }
+        if let up = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: location,
+            modifierFlags: [],
+            timestamp: timestamp + 0.001,
+            windowNumber: panel.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 0
+        ) {
+            panel.sendEvent(up)
+        }
     }
 
     /// Seeds a prior interaction epoch so the public toggle path can prove
@@ -972,13 +1029,6 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     var integrationContentMinSize: NSSize { panel.contentMinSize }
 
     private var screenGeometries: [PanelScreenGeometry] {
-        NSScreen.screens.enumerated().map { index, screen in
-            let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
-            return PanelScreenGeometry(
-                id: number?.stringValue ?? "screen-\(index)",
-                frame: screen.frame,
-                visibleFrame: screen.visibleFrame
-            )
-        }
+        screenGeometryProvider()
     }
 }

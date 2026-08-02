@@ -308,6 +308,90 @@ enum IntegrationCheckRunner {
         panelProbe.hide()
         RunLoop.current.run(until: Date().addingTimeInterval(0.2))
 
+        let screenChangeCenter = NotificationCenter()
+        let screenChangeFrameKey = "CueIntegrationRailScreenChange-\(UUID().uuidString)"
+        let initialScreen = PanelScreenGeometry(
+            id: "integration-screen",
+            frame: NSRect(x: 0, y: 0, width: 1_400, height: 900),
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_400, height: 900)
+        )
+        let initialCanonical = NSRect(x: 1_000, y: 150, width: 372, height: 600)
+        UserDefaults.standard.set(NSStringFromRect(initialCanonical), forKey: screenChangeFrameKey)
+        var screenChangeGeometries = [initialScreen]
+        var screenChangePointer = NSPoint(x: -10_000, y: -10_000)
+        let screenChangeProbe = FloatingPanelController(
+            model: model,
+            pointerLocationProvider: { screenChangePointer },
+            mouseButtonStateProvider: { false },
+            screenGeometryProvider: { screenChangeGeometries },
+            notificationCenter: screenChangeCenter,
+            savedFrameKey: screenChangeFrameKey
+        )
+        screenChangeProbe.show()
+        runLoop(for: 1.4)
+        let oldScreenRail = screenChangeProbe.integrationPanelFrame
+        check(isRetracted(screenChangeProbe.integrationPresentationState), "screen-change probe naturally retracts through the public show path")
+        screenChangePointer = NSPoint(x: oldScreenRail.midX, y: oldScreenRail.midY)
+        screenChangeProbe.runIntegrationPointerEntered(timestamp: ProcessInfo.processInfo.systemUptime + 0.001)
+        runLoop(for: 1.1)
+        check(
+            screenChangeProbe.integrationPresentationState == .expanded &&
+                screenChangeProbe.integrationLastRevealReason == .hover,
+            "screen-change probe reaches a real hover-expanded presentation"
+        )
+
+        let changedScreen = PanelScreenGeometry(
+            id: initialScreen.id,
+            frame: initialScreen.frame,
+            visibleFrame: NSRect(x: 0, y: 0, width: 1_000, height: 900)
+        )
+        screenChangeGeometries = [changedScreen]
+        let repairedCanonical = PanelGeometryPolicy.repairExpandedFrame(
+            initialCanonical,
+            screens: screenChangeGeometries
+        )!
+        let repairedRail = PanelGeometryPolicy.railPlacement(
+            for: repairedCanonical,
+            screens: screenChangeGeometries
+        )!
+        let repairedHover = PanelGeometryPolicy.hoverExpandedFrame(
+            canonicalExpandedFrame: repairedCanonical,
+            railPlacement: repairedRail
+        )
+        screenChangePointer = NSPoint(x: repairedRail.frame.midX, y: repairedRail.frame.midY)
+        screenChangeCenter.post(name: NSApplication.didChangeScreenParametersNotification, object: nil)
+        runLoop(for: 0.1)
+        check(
+            screenChangeProbe.integrationPanelFrame == repairedHover &&
+                repairedRail.edge == .left &&
+                abs(repairedRail.frame.minX - oldScreenRail.minX) > 0.5,
+            "screen parameters repair the hover preview onto a materially new rail"
+        )
+
+        screenChangeProbe.runIntegrationRailClick()
+        runLoop(for: 0.35)
+        let promotedAfterScreenChange = screenChangeProbe.integrationPanelFrame
+        check(
+            screenChangeProbe.integrationLastRevealReason == .railClick &&
+                abs(promotedAfterScreenChange.minX - repairedRail.frame.minX) < 0.5,
+            "CuePanel mouse events promote hover from the repaired rail instead of the stale edge"
+        )
+        check(
+            screenChangeProbe.integrationExpandedFrame == repairedCanonical,
+            "screen-repaired rail promotion leaves canonical expanded geometry unchanged"
+        )
+
+        screenChangeProbe.show()
+        runLoop(for: 0.35)
+        check(
+            screenChangeProbe.integrationPanelFrame == repairedCanonical &&
+                screenChangeProbe.integrationExpandedFrame == repairedCanonical,
+            "public show restores the repaired canonical frame after rail promotion"
+        )
+        screenChangeProbe.hide()
+        UserDefaults.standard.removeObject(forKey: screenChangeFrameKey)
+        runLoop(for: 0.2)
+
         var animationEntryPointer = NSPoint(x: -10_000, y: -10_000)
         let animationEntryProbe = FloatingPanelController(
             model: model,
