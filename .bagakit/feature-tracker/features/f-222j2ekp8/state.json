@@ -4,19 +4,19 @@
   "title": "Cue Screenshot Attachments and Sync Portability",
   "slug": "cue-screenshot-sync-portability",
   "goal": "Ship explicit region/window screenshot attachments with preview, Copy Image and Drag File while preserving one source of truth; ground sync requirements in real user evidence; define a non-confusing .cue and .cue.md compatibility contract; exclude OCR, passive capture and automatic upload.",
-  "status": "in_progress",
+  "status": "ready",
   "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
   "worktree_name": "",
   "worktree_path": "",
-  "current_task_id": "T-001",
+  "current_task_id": null,
   "runtime_role": "standalone",
   "blocked_reason_class": "none",
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 1,
+    "no_progress_rounds": 0,
     "round_count": 1
   },
   "gate": {
@@ -51,6 +51,14 @@
     {
       "action": "task_gate",
       "detail": "T-001 => pass"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => done"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=2; supersedes_revision=1"
     }
   ]
 }

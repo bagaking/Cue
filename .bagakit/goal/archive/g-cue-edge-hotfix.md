@@ -2,12 +2,13 @@
 schema: bagakit.loop-goal.v1
 protocol_version: bagakit.goal.v.0.3
 goal_id: g-cue-edge-hotfix
-status: active
-truth_surface: .bagakit/goal/g-cue-edge-hotfix.md
+status: complete
+truth_surface: .bagakit/goal/archive/g-cue-edge-hotfix.md
 execution_owner:
   kind: bagakit-feature-tracker
   ref: .bagakit/feature-tracker/features/f-224j2prfr
-completion_evidence: []
+completion_evidence:
+- .bagakit/feature-tracker/features/f-224j2prfr/verification.md
 ---
 
 # Goal: Cue Unobtrusive Edge Retraction

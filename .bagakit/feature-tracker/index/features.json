@@ -3,14 +3,14 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 2
+    "next_cursor": 3
   },
   "features": [
     {
       "feat_id": "f-222j2ekp8",
       "title": "Cue Screenshot Attachments and Sync Portability",
-      "status": "proposal",
-      "workspace_mode": "proposal_only",
+      "status": "ready",
+      "workspace_mode": "current_tree",
       "branch": "",
       "worktree_name": "",
       "runtime_role": "standalone",
@@ -20,6 +20,17 @@
     {
       "feat_id": "f-223j2ezq3",
       "title": "Cue Edge Retract and Panel Pin",
+      "status": "archived",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-224j2prfr",
+      "title": "Cue Unobtrusive Edge Retraction Hotfix",
       "status": "archived",
       "workspace_mode": "current_tree",
       "branch": "",

@@ -1,10 +1,9 @@
 {
-  "version": 2,
-  "feat_id": "f-222j2ekp8",
-  "plan_status": "reviewed",
-  "plan_revision": 2,
-  "supersedes_revision": 1,
-  "review_ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
+  "schema": "bagakit.feature-task-plan.v1",
+  "review": {
+    "status": "approved",
+    "evidence_ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md"
+  },
   "source_refs": [
     ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
     ".bagakit/researcher/topics/product/cue-sync-portability/summaries/synthesis-001.md",
@@ -12,53 +11,6 @@
     "AGENTS.md",
     "docs/PRODUCT.md",
     "docs/EXPERIMENTS.md"
-  ],
-  "plan_history": [
-    {
-      "revision": 1,
-      "supersedes_revision": null,
-      "review_ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
-      "source_refs": [
-        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
-        "docs/PRODUCT.md",
-        "docs/EXPERIMENTS.md"
-      ],
-      "task_ids": [
-        "T-001",
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005"
-      ],
-      "superseded_task_ids": []
-    },
-    {
-      "revision": 2,
-      "supersedes_revision": 1,
-      "review_ref": ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
-      "source_refs": [
-        ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
-        ".bagakit/researcher/topics/product/cue-sync-portability/summaries/synthesis-001.md",
-        ".bagakit/researcher/topics/product/cue-sync-portability/claims.md",
-        "AGENTS.md",
-        "docs/PRODUCT.md",
-        "docs/EXPERIMENTS.md"
-      ],
-      "task_ids": [
-        "T-001",
-        "T-006",
-        "T-007",
-        "T-008",
-        "T-009",
-        "T-010"
-      ],
-      "superseded_task_ids": [
-        "T-002",
-        "T-003",
-        "T-004",
-        "T-005"
-      ]
-    }
   ],
   "tasks": [
     {
@@ -82,19 +34,7 @@
         ".bagakit/feature-tracker/features/f-222j2ekp8/proposal.md",
         "docs/PRODUCT.md"
       ],
-      "supersedes": [],
-      "introduced_in_revision": 1,
-      "status": "done",
-      "gate_result": "pass",
-      "last_gate_commands": [
-        {
-          "command": "sh scripts/check.sh",
-          "exit_code": 0,
-          "status": "pass"
-        }
-      ],
-      "last_commit_hash": "7affa2cf8c996e4784aee16f585f43b578754a38",
-      "notes": []
+      "supersedes": []
     },
     {
       "id": "T-006",
@@ -120,15 +60,7 @@
         "Sources/Cue/WorkspacePackageCodec.swift",
         "Sources/Cue/WorkspaceStore.swift"
       ],
-      "supersedes": [
-        "T-002"
-      ],
-      "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "last_commit_hash": null,
-      "notes": []
+      "supersedes": ["T-002"]
     },
     {
       "id": "T-007",
@@ -154,13 +86,7 @@
         "Sources/Cue/WorkspaceStore.swift",
         "Sources/Cue/AppModel.swift"
       ],
-      "supersedes": [],
-      "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "last_commit_hash": null,
-      "notes": []
+      "supersedes": []
     },
     {
       "id": "T-008",
@@ -190,15 +116,7 @@
         ".bagakit/researcher/topics/product/cue-sync-portability/summaries/synthesis-001.md",
         "docs/PRODUCT.md"
       ],
-      "supersedes": [
-        "T-003"
-      ],
-      "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "last_commit_hash": null,
-      "notes": []
+      "supersedes": ["T-003"]
     },
     {
       "id": "T-009",
@@ -229,15 +147,7 @@
         "Sources/Cue/WorkItemCard.swift",
         "Sources/Cue/SidecarView.swift"
       ],
-      "supersedes": [
-        "T-004"
-      ],
-      "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "last_commit_hash": null,
-      "notes": []
+      "supersedes": ["T-004"]
     },
     {
       "id": "T-010",
@@ -273,15 +183,7 @@
         "scripts/check.sh",
         "docs/EXPERIMENTS.md"
       ],
-      "supersedes": [
-        "T-005"
-      ],
-      "introduced_in_revision": 2,
-      "status": "todo",
-      "gate_result": null,
-      "last_gate_commands": [],
-      "last_commit_hash": null,
-      "notes": []
+      "supersedes": ["T-005"]
     }
   ]
 }

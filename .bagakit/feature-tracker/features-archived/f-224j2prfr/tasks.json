@@ -110,7 +110,7 @@
       ],
       "supersedes": [],
       "introduced_in_revision": 1,
-      "status": "in_progress",
+      "status": "done",
       "gate_result": "pass",
       "last_gate_commands": [
         {
@@ -119,7 +119,7 @@
           "status": "pass"
         }
       ],
-      "last_commit_hash": null,
+      "last_commit_hash": "7f7e519debde54314b8e2c730c0fc44e5b79acd6",
       "notes": []
     }
   ]

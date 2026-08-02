@@ -1,6 +1,6 @@
 schema: bagakit.goal-state.v1
 protocol_version: bagakit.goal.v.0.3
-foreground_goal: g-cue-edge-hotfix
+foreground_goal: g-cue-platform-increment
 supervision:
   mode: self
   contract: .bagakit/goal/supervisor.md
@@ -8,21 +8,12 @@ supervision:
 goals:
   g-cue-platform-increment:
     file: .bagakit/goal/g-cue-platform-increment.md
-    status: paused
-    role: backlog
-    execution_owner:
-      kind: bagakit-feature-tracker
-      ref: .bagakit/feature-tracker/features/f-222j2ekp8
-    event_log: .bagakit/goal/events/g-cue-platform-increment.jsonl
-    reconciled_through: 1
-  g-cue-edge-hotfix:
-    file: .bagakit/goal/g-cue-edge-hotfix.md
     status: active
     role: foreground
     execution_owner:
       kind: bagakit-feature-tracker
-      ref: .bagakit/feature-tracker/features/f-224j2prfr
-    event_log: .bagakit/goal/events/g-cue-edge-hotfix.jsonl
+      ref: .bagakit/feature-tracker/features/f-222j2ekp8
+    event_log: .bagakit/goal/events/g-cue-platform-increment.jsonl
     reconciled_through: 1
 edges: []
 archive:
