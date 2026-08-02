@@ -1,0 +1,147 @@
+# Cue Sync, Portability, and Screenshot Evidence
+
+## Goal
+
+Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
+
+## Local Topic Layout
+
+```text
+.bagakit/researcher/topics/product/cue-sync-portability/
+├── originals/
+├── summaries/
+├── surveys/        # optional pre-retrieval packets
+├── passes/         # optional bounded pass plans
+├── tracks/         # optional parallel work contracts
+└── index.md
+```
+
+## Current Read Order
+
+1. `charter.md` and `surveys/` when present
+2. `passes/` and `tracks/` when present
+3. `summaries/`
+4. preserved source cards under `originals/`
+5. update this index after every meaningful research pass
+
+## Source Cards
+- none yet
+
+## Summaries
+- none yet
+
+## Remaining Gaps
+
+- add or refine source cards
+- add or refine reusable summaries
+- update the reading order when the topic changes
+
+<!-- BAGAKIT:RESEARCHER:SOURCE-CARDS:START -->
+## Source Cards
+- `originals/f01.md` — Obsidian data storage documentation
+- `originals/f02.md` — Apple Document Packages
+- `originals/f03.md` — Apple NSFileCoordinator documentation
+- `originals/f04.md` — CommonMark 0.31.2 specification
+- `originals/j01.md` — Joplin issue 16020: non-overlapping offline edits still conflict
+- `originals/j02.md` — Joplin issue 6081: attachment conflict
+- `originals/j03.md` — Joplin issue 11745: conflict deletion harms Android and sync
+- `originals/j04.md` — Joplin issue 12170: resource conflicts must copy, not move
+- `originals/m01.md` — Apple UIDocumentBrowserViewController documentation
+- `originals/m02.md` — Apple UIDocument documentation
+- `originals/m03.md` — Apple Designing for Documents in iCloud
+- `originals/r01.md` — Pewter audited source
+- `originals/r02.md` — Nickel audited source
+- `originals/s01.md` — Apple SCScreenshotManager documentation
+- `originals/s02.md` — WWDC23: Meet ScreenCaptureKit
+- `originals/s03.md` — Apple SCContentSharingPicker documentation
+- `originals/s04.md` — Nonstrict ScreenCaptureKit recording example at audited commit
+- `originals/x01.md` — Copper launch statement: local, private, no sync or account
+- `originals/x02.md` — Copper user asks about iCloud backup and privacy
+- `originals/x03.md` — Copper owner clarifies local file and no iCloud
+- `originals/x04.md` — Copper user requests export and external editor access
+- `originals/x05.md` — Copper user requests programmatic JSON or CLI access
+- `originals/x06.md` — Copper owner confirms direct JSON readability
+- `originals/x07.md` — Copper owner lists attachments as roadmap
+<!-- BAGAKIT:RESEARCHER:SOURCE-CARDS:END -->
+
+<!-- BAGAKIT:RESEARCHER:SUMMARIES:START -->
+## Summaries
+- `summaries/f01.md` — Obsidian data storage documentation summary
+- `summaries/f02.md` — Apple Document Packages summary
+- `summaries/f03.md` — Apple NSFileCoordinator documentation summary
+- `summaries/f04.md` — CommonMark 0.31.2 specification summary
+- `summaries/j01.md` — Joplin issue 16020: non-overlapping offline edits still conflict summary
+- `summaries/j02.md` — Joplin issue 6081: attachment conflict summary
+- `summaries/j03.md` — Joplin issue 11745: conflict deletion harms Android and sync summary
+- `summaries/j04.md` — Joplin issue 12170: resource conflicts must copy, not move summary
+- `summaries/m01.md` — Apple UIDocumentBrowserViewController documentation summary
+- `summaries/m02.md` — Apple UIDocument documentation summary
+- `summaries/m03.md` — Apple Designing for Documents in iCloud summary
+- `summaries/r01.md` — Pewter audited source summary
+- `summaries/r02.md` — Nickel audited source summary
+- `summaries/s01.md` — Apple SCScreenshotManager documentation summary
+- `summaries/s02.md` — WWDC23: Meet ScreenCaptureKit summary
+- `summaries/s03.md` — Apple SCContentSharingPicker documentation summary
+- `summaries/s04.md` — Nonstrict ScreenCaptureKit recording example at audited commit summary
+- `summaries/synthesis-001.md` — Cue portability, sync and screenshot synthesis
+- `summaries/x01.md` — Copper launch statement: local, private, no sync or account summary
+- `summaries/x02.md` — Copper user asks about iCloud backup and privacy summary
+- `summaries/x03.md` — Copper owner clarifies local file and no iCloud summary
+- `summaries/x04.md` — Copper user requests export and external editor access summary
+- `summaries/x05.md` — Copper user requests programmatic JSON or CLI access summary
+- `summaries/x06.md` — Copper owner confirms direct JSON readability summary
+- `summaries/x07.md` — Copper owner lists attachments as roadmap summary
+<!-- BAGAKIT:RESEARCHER:SUMMARIES:END -->
+
+<!-- BAGAKIT:RESEARCHER:SURVEYS:START -->
+## Surveys
+- `surveys/survey-001.md` — survey-001
+<!-- BAGAKIT:RESEARCHER:SURVEYS:END -->
+
+<!-- BAGAKIT:RESEARCHER:PASSES:START -->
+## Passes
+- `passes/pass-001.md` — pass-001
+<!-- BAGAKIT:RESEARCHER:PASSES:END -->
+
+<!-- BAGAKIT:RESEARCHER:TRACKS:START -->
+## Tracks
+- `tracks/adjacent-demand.md` — adjacent-demand
+- `tracks/capture-platform.md` — capture-platform
+- `tracks/copper-discussion.md` — copper-discussion
+- `tracks/format-architecture.md` — format-architecture
+<!-- BAGAKIT:RESEARCHER:TRACKS:END -->
+
+<!-- BAGAKIT:RESEARCHER:CLAIMS:START -->
+## Claims
+- `claims.md#c001` — c001
+- `claims.md#c002` — c002
+- `claims.md#c003` — c003
+- `claims.md#c004` — c004
+- `claims.md#c005` — c005
+- `claims.md#c006` — c006
+- `claims.md#c007` — c007
+- `claims.md#c008` — c008
+- `claims.md#c009` — c009
+- `claims.md#c010` — c010
+- `claims.md#c011` — c011
+- `claims.md#c012` — c012
+- `claims.md#c013` — c013
+- `claims.md#c014` — c014
+<!-- BAGAKIT:RESEARCHER:CLAIMS:END -->
+
+<!-- BAGAKIT:RESEARCHER:INSIGHTS:START -->
+## Insights
+- `insights/i001.md` — Portability before provider
+- `insights/i002.md` — Independent records reduce sync contention only when global metadata stops being authoritative
+- `insights/i003.md` — Screenshot privacy is a pre-byte architecture property
+- `insights/i004.md` — Attachment UI is downstream of recoverable binary truth
+- `insights/i005.md` — Source provenance is part of product truth
+<!-- BAGAKIT:RESEARCHER:INSIGHTS:END -->
+
+<!-- BAGAKIT:RESEARCHER:LEADS:START -->
+## Leads
+- `leads.md#l001` — l001 (open)
+- `leads.md#l002` — l002 (open)
+- `leads.md#l003` — l003 (open)
+- `leads.md#l004` — l004 (open)
+<!-- BAGAKIT:RESEARCHER:LEADS:END -->

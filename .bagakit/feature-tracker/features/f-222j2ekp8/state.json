@@ -4,26 +4,32 @@
   "title": "Cue Screenshot Attachments and Sync Portability",
   "slug": "cue-screenshot-sync-portability",
   "goal": "Ship explicit region/window screenshot attachments with preview, Copy Image and Drag File while preserving one source of truth; ground sync requirements in real user evidence; define a non-confusing .cue and .cue.md compatibility contract; exclude OCR, passive capture and automatic upload.",
-  "status": "proposal",
-  "workspace_mode": "proposal_only",
+  "status": "in_progress",
+  "workspace_mode": "current_tree",
   "base_ref": "main",
   "branch": "",
   "worktree_name": "",
   "worktree_path": "",
-  "current_task_id": null,
+  "current_task_id": "T-001",
   "runtime_role": "standalone",
   "blocked_reason_class": "none",
   "runtime_relations": [],
   "counters": {
     "gate_fail_streak": 0,
-    "no_progress_rounds": 0,
-    "round_count": 0
+    "no_progress_rounds": 1,
+    "round_count": 1
   },
   "gate": {
-    "last_result": null,
-    "last_task_id": null,
-    "last_check_commands": [],
-    "last_log_path": null
+    "last_result": "pass",
+    "last_task_id": "T-001",
+    "last_check_commands": [
+      {
+        "command": "sh scripts/check.sh",
+        "exit_code": 0,
+        "status": "pass"
+      }
+    ],
+    "last_log_path": ".bagakit/feature-tracker/features/f-222j2ekp8/artifacts/gate-T-001-r1-0001.log"
   },
   "history": [
     {
@@ -33,6 +39,18 @@
     {
       "action": "task_plan_set",
       "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    },
+    {
+      "action": "task_gate",
+      "detail": "T-001 => pass"
     }
   ]
 }
