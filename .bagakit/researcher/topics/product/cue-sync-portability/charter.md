@@ -7,7 +7,8 @@ Which sync, portability, mobile-capture, and screenshot behaviors are supported 
 ## Decision Or Downstream Use
 
 Decide the T-001 architecture and market-requirement section of Feature
-`f-222j2ekp8`, then constrain the attachment, capture, and interaction tasks.
+`f-222j2ekp8`, constrain the attachment, capture, and interaction tasks, and
+qualify the T-006 package-publication primitive before implementation.
 Research must not select or implement a sync provider in this increment.
 
 ## Output Shape
@@ -22,6 +23,8 @@ Tracker proposal.
 - Comparable capture and notes-tool user evidence for the same jobs and failure
   modes.
 - Primary package/Markdown format contracts relevant to `.cue` and `.cue.md`.
+- Primary Foundation publication/coordination contracts, lower-level
+  counterevidence, and bounded local package-replacement experiments.
 - Apple-native explicit region/window capture APIs and audited open-source
   implementation evidence.
 
@@ -46,7 +49,8 @@ Architecture recommendations need primary behavior documentation, a stated
 inference, limitations, and a transfer check against Cue's current package.
 
 ## Stop Conditions
-- Each decision has direct evidence or is explicitly marked inference; remaining gaps cannot change the screenshot slice or .cue compatibility direction.
+- Each decision has direct evidence or is explicitly marked inference; remaining gaps cannot change the screenshot slice, `.cue` compatibility direction,
+  or the bounded T-006 publication contract.
 
 ## Drift Sentinels
 - Stop any lane that becomes a generic notes-app survey or implementation

@@ -21,7 +21,7 @@ checked-in knowledge root and it is not repository evolution memory.
 - [wiki/claims/supported-claims.md](wiki/claims/supported-claims.md)
 
 ## Topic Index
-- `product/cue-sync-portability` — [Cue Sync, Portability, and Screenshot Evidence](topics/product/cue-sync-portability/index.md); synthesis: [synthesis-001.md](topics/product/cue-sync-portability/summaries/synthesis-001.md) (sources=24, summaries=25, surveys=1, claims=14)
+- `product/cue-sync-portability` — [Cue Sync, Portability, and Screenshot Evidence](topics/product/cue-sync-portability/index.md); synthesis: [synthesis-001.md](topics/product/cue-sync-portability/summaries/synthesis-001.md) (sources=28, summaries=29, surveys=1, claims=17)
 
 ## Status
 

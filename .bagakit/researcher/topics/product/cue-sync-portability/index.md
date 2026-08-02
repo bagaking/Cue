@@ -39,6 +39,10 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 - `originals/f02.md` — Apple Document Packages
 - `originals/f03.md` — Apple NSFileCoordinator documentation
 - `originals/f04.md` — CommonMark 0.31.2 specification
+- `originals/f05.md` — Apple FileManager safe replacement contract
+- `originals/f06.md` — Apple NSFileCoordinator package read and write semantics
+- `originals/f07.md` — Darwin rename(2) contract
+- `originals/f08.md` — Cue same-volume package publication process experiment
 - `originals/j01.md` — Joplin issue 16020: non-overlapping offline edits still conflict
 - `originals/j02.md` — Joplin issue 6081: attachment conflict
 - `originals/j03.md` — Joplin issue 11745: conflict deletion harms Android and sync
@@ -67,6 +71,10 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 - `summaries/f02.md` — Apple Document Packages summary
 - `summaries/f03.md` — Apple NSFileCoordinator documentation summary
 - `summaries/f04.md` — CommonMark 0.31.2 specification summary
+- `summaries/f05.md` — Apple FileManager safe replacement contract summary
+- `summaries/f06.md` — Apple NSFileCoordinator package semantics summary
+- `summaries/f07.md` — Darwin rename contract summary
+- `summaries/f08.md` — Cue package publication experiment summary
 - `summaries/j01.md` — Joplin issue 16020: non-overlapping offline edits still conflict summary
 - `summaries/j02.md` — Joplin issue 6081: attachment conflict summary
 - `summaries/j03.md` — Joplin issue 11745: conflict deletion harms Android and sync summary
@@ -98,6 +106,7 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 <!-- BAGAKIT:RESEARCHER:PASSES:START -->
 ## Passes
 - `passes/pass-001.md` — pass-001
+- `passes/pass-002.md` — Cue package publication contract
 <!-- BAGAKIT:RESEARCHER:PASSES:END -->
 
 <!-- BAGAKIT:RESEARCHER:TRACKS:START -->
@@ -106,6 +115,7 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 - `tracks/capture-platform.md` — capture-platform
 - `tracks/copper-discussion.md` — copper-discussion
 - `tracks/format-architecture.md` — format-architecture
+- `tracks/package-publication.md` — package-publication
 <!-- BAGAKIT:RESEARCHER:TRACKS:END -->
 
 <!-- BAGAKIT:RESEARCHER:CLAIMS:START -->
@@ -124,6 +134,9 @@ Research topic for `.bagakit/researcher/topics/product/cue-sync-portability`.
 - `claims.md#c012` — c012
 - `claims.md#c013` — c013
 - `claims.md#c014` — c014
+- `claims.md#c015` — c015
+- `claims.md#c016` — c016
+- `claims.md#c017` — c017
 <!-- BAGAKIT:RESEARCHER:CLAIMS:END -->
 
 <!-- BAGAKIT:RESEARCHER:INSIGHTS:START -->

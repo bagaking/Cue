@@ -28,7 +28,8 @@
 - In scope:
   - public-user evidence for sync, mobile capture, attachments, conflicts, portability and privacy;
   - `.cue` / `.cue.md` compatibility decision;
-  - a coordinated schema-3 package transaction and shared Foundation-only storage core before attachments;
+  - a coordinated schema-3 package transaction and shared UI-framework-free
+    Foundation + CryptoKit storage core before attachments;
   - native explicit region/window screenshot capture;
   - content-addressed PNG attachments inside `.cue/assets/sha256/`;
   - item preview, Copy Image and Drag File;
@@ -67,7 +68,11 @@
 - Delete operations bind the observed record revision/hash. Wall-clock last-write-wins is forbidden for edit/delete conflicts.
 - Same identity and revision must mean the same bytes. Divergent bytes preserve both sides as an explicit conflict; no silent merge or overwrite.
 - Assets are written and verified before referencing metadata is published. Missing/corrupt assets remain visible typed errors. Physical GC waits for retention and convergence evidence.
-- App, future CLI and future iPhone client share one Foundation-only `CueCore` codec and coordinated transaction API. File transport alone does not make a safe multi-client product.
+- App, future CLI and future iPhone client share one UI-framework-free
+  `CueCore` codec and coordinated transaction API. The target uses Foundation
+  plus the existing Apple CryptoKit SHA-256 implementation, never AppKit,
+  SwiftUI or Combine. File transport alone does not make a safe multi-client
+  product.
 - Until two-Mac offline edit/delete/attachment tests pass, Cue may say the format has sync-friendly object boundaries; it may not claim reliable Mac-to-Mac sync.
 
 ### Native screenshot boundary
@@ -81,7 +86,13 @@
 ### Storage gate before attachment UI
 
 - Current `WorkspaceStore` cannot safely accept PNG attachments unchanged: load/fingerprint are not one snapshot, CAS has a TOCTOU window, sequential publication can expose hybrid packages, rollback removes live before restore, and Undo/Recovery/Conflict Copy carry no asset bytes.
-- The next implementation plan must start with a coordinated staged-package transaction: write and verify immutable blobs, publish metadata, validate the complete package, then atomically replace the live package while preserving a valid prior package.
+- The next implementation plan must start with a coordinated staged-package
+  transaction: write and verify the complete hidden same-parent stage, then
+  inside one `NSFileCoordinator(options: [])` accessor recheck the exact live
+  revision and publish with `FileManager.replaceItemAt` while retaining the
+  displaced prior package. Named application/process failpoints must reopen as
+  complete old or new packages; this is not a power-loss or reliable-sync
+  claim, and failure never removes live before copying a backup.
 - Attachment refcounts are derived from retained WorkItems, never stored as mutable counters. Archive, Undo, Recovery and conflict originals are protected references.
 - Preview, Copy Image, Drag File and Remove remain downstream of that storage contract. Text-only card density must remain unchanged.
 

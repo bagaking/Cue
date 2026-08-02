@@ -93,13 +93,18 @@ A cue package should remain the only mutable workspace truth; per-item Markdown 
 This preserves openness without creating a second writer or confusing workspace identity.
 ## c005
 
-- kind: `observation`
+- kind: `inference`
 - status: `supported`
 - confidence: `high`
 
 ### Statement
 
-Cue schema 2 is not safe to market as reliable Mac-to-Mac sync because manifest membership, uncoordinated fingerprint CAS, wall-clock tombstones and immediate asset deletion can lose or hide concurrent work.
+Cue schema 2 is not safe to market as reliable Mac-to-Mac sync. The shipped
+code uses manifest membership, obtains the decoded document and fingerprint in
+separate reads, checks the fingerprint before later sequential writes, and
+uses wall-clock tombstones; together those observed mechanisms leave
+concurrent overwrite and hybrid-package risks. Schema 2 has no attachment
+lifecycle, so no asset deletion behavior is shipped or qualified.
 
 ### Evidence Refs
 - Sources/Cue/WorkspacePackageCodec.swift
@@ -141,13 +146,17 @@ On macOS 14, explicit screenshots should use SCScreenshotManager for one-shot in
 Capture, PNG validation and one storage commit belong behind one ScreenshotCaptureService owner.
 ## c007
 
-- kind: `observation`
+- kind: `inference`
 - status: `supported`
 - confidence: `high`
 
 ### Statement
 
-Screenshot attachments cannot be safely layered onto the current WorkspaceStore because document and fingerprint are not one snapshot, CAS has a TOCTOU gap, multi-file publication can expose hybrid packages, and recovery snapshots omit asset bytes.
+Screenshot attachments cannot be safely layered onto the current
+`WorkspaceStore`: its observed split document/fingerprint read, pre-write CAS,
+and sequential record publication create snapshot, race, and hybrid-package
+risks, while current recovery snapshots carry only the document model and no
+asset closure.
 
 ### Evidence Refs
 - Sources/Cue/WorkspaceStore.swift
@@ -214,7 +223,11 @@ Cue should attribute transfer behavior to Apple public contracts and its own tes
 
 ### Statement
 
-Future Cue CLI, macOS app and iPhone client must share one Foundation-only CueCore codec and coordinated transaction API rather than reimplement storage per client.
+Future Cue CLI, macOS app and iPhone client must share one
+UI-framework-free `CueCore` codec and coordinated transaction API rather than
+reimplement storage per client. The shared target uses Foundation plus the
+existing Apple CryptoKit SHA-256 implementation and excludes AppKit, SwiftUI,
+and Combine.
 
 ### Evidence Refs
 - originals/x05.md
@@ -312,3 +325,89 @@ Obsidian demonstrates that a user-owned folder of plain Markdown files can be a 
 ### Bagakit Implication
 
 Cue's package recommendation is a product-specific identity and asset boundary, not a universal Markdown rule.
+
+## c015
+
+- kind: `observation`
+- status: `supported`
+- confidence: `high`
+
+### Statement
+
+Apple documents `FileManager.replaceItemAt` as a same-volume, no-data-loss
+replacement API, recommends an OS replacement directory or a unique
+same-parent item, and supports retaining a named backup. Apple documents
+`NSFileCoordinator` accessors for files/directories and file packages, but
+neither contract supplies Cue's semantic revision check or states a
+power-loss/directory-fsync guarantee.
+
+### Evidence Refs
+- originals/f05.md
+- originals/f06.md
+
+### Counterevidence Refs
+- originals/f07.md
+
+### Bagakit Implication
+
+Foundation supplies the project-native coordination and safe-replacement
+primitives, while Cue must own snapshot revision, stage validation, conflict,
+and recovery semantics and must not inherit stronger syscall claims.
+
+## c016
+
+- kind: `observation`
+- status: `supported`
+- confidence: `medium`
+
+### Statement
+
+On one macOS 26.3.2 APFS host, Cue's checked-in standalone probe observed a
+pre-publication process abort leaving complete live-old plus staged-new and no
+backup, and an immediate post-publication process abort leaving complete
+live-new plus retained backup-old. Two independent
+`NSFileCoordinator(options: [])` writers using one expected generation
+produced exactly one success and one conflict.
+
+### Evidence Refs
+- originals/f08.md
+- originals/f08-package-publication-probe.swift
+
+### Counterevidence Refs
+- originals/f08.md#limitations
+
+### Bagakit Implication
+
+The selected composition is testable for T-006 application/process failpoints
+and participating-process CAS, but the observation is not filesystem-general,
+power-loss qualification, dual-Mac qualification, or shipped behavior.
+
+## c017
+
+- kind: `recommendation`
+- status: `supported`
+- confidence: `medium`
+
+### Statement
+
+Cue T-006 should build and fully validate a hidden same-parent staged package,
+then inside one `NSFileCoordinator` write accessor with `options: []` recheck
+the exact live revision and publish through `FileManager.replaceItemAt` with a
+named retained backup. Post-publication failure preserves live and displaced
+packages for typed recovery; it never removes live and copies a backup back.
+
+### Evidence Refs
+- claims.md#c015
+- claims.md#c016
+- originals/f05.md
+- originals/f06.md
+
+### Counterevidence Refs
+- originals/f07.md
+- originals/f08.md#limitations
+
+### Bagakit Implication
+
+Promise and test complete old-or-new packages under named application/process
+failpoints. Do not claim undocumented power-cut durability or reliable sync,
+and do not replace the Foundation writer with a Darwin-specific implementation.
