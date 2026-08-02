@@ -801,7 +801,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         panel.contentMinSize = PanelGeometryPolicy.railSize
         panel.contentMaxSize = PanelGeometryPolicy.railSize
         panel.isMovableByWindowBackground = false
-        panel.hasShadow = true
+        panel.hasShadow = false
     }
 
     private func saveExpandedFrameIfUserDriven() {
@@ -1027,6 +1027,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     var integrationPanelFrame: NSRect { panel.frame }
     var integrationPanelMinSize: NSSize { panel.minSize }
     var integrationContentMinSize: NSSize { panel.contentMinSize }
+    var integrationPanelHasShadow: Bool { panel.hasShadow }
 
     private var screenGeometries: [PanelScreenGeometry] {
         screenGeometryProvider()

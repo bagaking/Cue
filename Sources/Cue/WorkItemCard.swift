@@ -42,6 +42,9 @@ struct WorkItemCard: View {
                     .strikethrough(item.state == .completed)
                     .foregroundStyle(item.state == .completed ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .environment(\.openURL, OpenURLAction { url in
+                        handleOpenURL(url)
+                    })
 
                 HStack(spacing: 5) {
                     Label(item.kind.label, systemImage: item.kind.symbol)
@@ -89,8 +92,14 @@ struct WorkItemCard: View {
         )
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
-        .simultaneousGesture(TapGesture(count: 1).onEnded(onSelect))
-        .simultaneousGesture(TapGesture(count: 2).onEnded(onEdit))
+        .simultaneousGesture(TapGesture(count: 1).onEnded {
+            guard WorkItemLinkPolicy.allowsCardGesture(modifiers: NSEvent.modifierFlags) else { return }
+            onSelect()
+        })
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
+            guard WorkItemLinkPolicy.allowsCardGesture(modifiers: NSEvent.modifierFlags) else { return }
+            onEdit()
+        })
         .contextMenu { contextMenu }
         .onDrag { NSItemProvider(object: item.id.uuidString as NSString) }
         .onDrop(of: [UTType.text], delegate: WorkItemDropDelegate(onDrop: onDropBefore))
@@ -135,8 +144,15 @@ struct WorkItemCard: View {
     }
 
     private var markdownText: AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: item.body, options: options)) ?? AttributedString(item.body)
+        WorkItemLinkPolicy.attributedBody(item.body)
+    }
+
+    private func handleOpenURL(_ url: URL) -> OpenURLAction.Result {
+        guard WorkItemLinkPolicy.allowsOpening(url, modifiers: NSEvent.modifierFlags) else {
+            return .discarded
+        }
+        _ = NSWorkspace.shared.open(url)
+        return .handled
     }
 
     private var accessibilityLabel: String {
@@ -144,6 +160,25 @@ struct WorkItemCard: View {
         if let app = item.source.appName { parts.append("from \(app)") }
         if item.pinned { parts.append("pinned") }
         return parts.joined(separator: ", ")
+    }
+}
+
+enum WorkItemLinkPolicy {
+    static func attributedBody(_ source: String) -> AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        return (try? AttributedString(markdown: source, options: options)) ?? AttributedString(source)
+    }
+
+    static func allowsOpening(_ url: URL, modifiers: NSEvent.ModifierFlags) -> Bool {
+        guard modifiers.contains(.command),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let host = url.host, !host.isEmpty else { return false }
+        return true
+    }
+
+    static func allowsCardGesture(modifiers: NSEvent.ModifierFlags) -> Bool {
+        !modifiers.contains(.command)
     }
 }
 

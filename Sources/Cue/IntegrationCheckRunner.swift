@@ -30,6 +30,28 @@ enum IntegrationCheckRunner {
             return false
         }
 
+        func inlineMarkdownLinks(in source: String) -> [URL] {
+            WorkItemLinkPolicy.attributedBody(source).runs.compactMap { $0.link }
+        }
+
+        let webURL = URL(string: "https://example.com/reference")!
+        let uppercaseWebURL = URL(string: "HTTPS://example.com/reference")!
+        check(WorkItemLinkPolicy.allowsOpening(webURL, modifiers: [.command]), "Command-click policy permits an HTTPS note link")
+        check(WorkItemLinkPolicy.allowsOpening(URL(string: "http://example.com/reference")!, modifiers: [.command]), "Command-click policy permits an HTTP note link")
+        check(WorkItemLinkPolicy.allowsOpening(uppercaseWebURL, modifiers: [.command, .shift]), "Command-click policy normalizes the web scheme and tolerates additional modifiers")
+        check(!WorkItemLinkPolicy.allowsOpening(webURL, modifiers: []), "ordinary note link clicks never navigate")
+        check(!WorkItemLinkPolicy.allowsOpening(URL(fileURLWithPath: "/tmp/cue-link"), modifiers: [.command]), "Command-click rejects file URLs")
+        check(!WorkItemLinkPolicy.allowsOpening(URL(string: "cue://open/reference")!, modifiers: [.command]), "Command-click rejects custom URL schemes")
+        check(!WorkItemLinkPolicy.allowsOpening(URL(string: "javascript:alert(1)")!, modifiers: [.command]), "Command-click rejects javascript URLs")
+        check(!WorkItemLinkPolicy.allowsOpening(URL(string: "reference")!, modifiers: [.command]), "Command-click rejects links without a scheme")
+        check(!WorkItemLinkPolicy.allowsOpening(URL(string: "https:reference")!, modifiers: [.command]), "Command-click rejects hostless web URLs")
+        check(WorkItemLinkPolicy.allowsCardGesture(modifiers: []), "ordinary clicks retain card gesture semantics")
+        check(WorkItemLinkPolicy.allowsCardGesture(modifiers: [.shift]), "non-Command modifiers retain card gesture semantics")
+        check(!WorkItemLinkPolicy.allowsCardGesture(modifiers: [.command]), "Command-click cannot also select or edit a card")
+        check(inlineMarkdownLinks(in: "https://example.com/reference") == [webURL], "inline Markdown exposes a bare web link")
+        check(inlineMarkdownLinks(in: "<https://example.com/reference>") == [webURL], "inline Markdown exposes an angle-bracketed web link")
+        check(inlineMarkdownLinks(in: "[Reference](https://example.com/reference)") == [webURL], "inline Markdown exposes a labeled web link")
+
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CueIntegration-\(UUID())", isDirectory: true)
         let settingsStore = SettingsStore(directoryURL: root.appendingPathComponent("Settings", isDirectory: true))
         let workspaceStore = WorkspaceStore()
@@ -285,6 +307,10 @@ enum IntegrationCheckRunner {
         var probePointer = NSPoint(x: -10_000, y: -10_000)
         let panelProbe = FloatingPanelController(model: model, pointerLocationProvider: { probePointer })
         if let expectedRail = panelProbe.runIntegrationRetractionProbe() {
+            check(
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || panelProbe.integrationPanelHasShadow,
+                "animated retraction keeps the actual NSPanel shadow until the compact frame settles"
+            )
             let probeDeadline = Date().addingTimeInterval(1.4)
             while Date() < probeDeadline {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.02))
@@ -294,12 +320,14 @@ enum IntegrationCheckRunner {
             check(abs(actualRail.width - expectedRail.width) < 0.5 && abs(actualRail.height - expectedRail.height) < 0.5, "actual retained-Sidecar NSPanel accepts the 22 by 88 rail frame")
             check(abs(actualRail.minX - expectedRail.minX) < 0.5 && abs(actualRail.minY - expectedRail.minY) < 0.5, "actual NSPanel lands on the derived screen-edge target")
             check(panelProbe.integrationPanelMinSize.width <= expectedRail.width && panelProbe.integrationContentMinSize.width <= expectedRail.width, "retracted NSPanel constraints no longer retain expanded minimum geometry")
+            check(!panelProbe.integrationPanelHasShadow, "settled retraction removes the actual NSPanel shadow")
 
             let canonicalBeforeRailClick = panelProbe.integrationExpandedFrame
             panelProbe.runIntegrationRailClick()
             runLoop(for: 0.35)
             let actualRailClick = panelProbe.integrationPanelFrame
             check(panelProbe.integrationPresentationState == .expanded, "clicking the rail explicitly expands the actual NSPanel")
+            check(panelProbe.integrationPanelHasShadow, "rail click restores the actual expanded NSPanel shadow")
             check(panelProbe.integrationLastRevealReason == .railClick, "rail click retains distinct explicit reveal semantics")
             check(panelProbe.integrationExpandedFrame == canonicalBeforeRailClick, "rail click never mutates canonical expanded geometry")
             check(actualRailClick.intersects(actualRail), "rail click expansion remains connected to its originating rail")
@@ -312,6 +340,7 @@ enum IntegrationCheckRunner {
             runLoop(for: 1.0)
             let railAfterClick = panelProbe.integrationPanelFrame
             check(isRetracted(panelProbe.integrationPresentationState), "rail-click reveal returns to the same compact lifecycle after disengagement")
+            check(!panelProbe.integrationPanelHasShadow, "natural retraction removes the actual NSPanel shadow again")
             probePointer = NSPoint(x: railAfterClick.midX, y: railAfterClick.midY)
             panelProbe.runIntegrationPointerEntered(timestamp: ProcessInfo.processInfo.systemUptime + 0.001)
             let revealDeadline = Date().addingTimeInterval(1.1)
@@ -320,6 +349,7 @@ enum IntegrationCheckRunner {
             }
             let actualHover = panelProbe.integrationPanelFrame
             check(panelProbe.integrationPresentationState == .expanded, "validated rail hover reveals exactly one stable expanded preview")
+            check(panelProbe.integrationPanelHasShadow, "rail hover restores the actual expanded NSPanel shadow")
             check(actualHover.intersects(railAfterClick), "actual hover preview preserves a continuous rail-to-content pointer path")
             if railAfterClick.midX > actualHover.midX {
                 check(abs(actualHover.maxX - railAfterClick.maxX) < 0.5, "actual right-edge hover preview closes the outer strip gap")

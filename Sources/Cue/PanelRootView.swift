@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -66,37 +67,90 @@ private struct EdgeRailView: View {
     var opaque: Bool
 
     private var countText: String { queuedCount > 99 ? "99+" : "\(queuedCount)" }
+    private let tongueWidth: CGFloat = 18
 
     var body: some View {
-        VStack(spacing: 9) {
-            Image(systemName: edge == .left ? "chevron.right" : "chevron.left")
-                .font(.system(size: 9, weight: .black))
-                .foregroundStyle(.secondary)
+        GeometryReader { geometry in
+            ZStack {
+                ZStack {
+                    VisualEffectBackground(material: .popover)
+                    Color(nsColor: .windowBackgroundColor).opacity(opaque ? 1 : 0.78)
+                }
 
-            if queuedCount > 0 {
-                Text(countText)
-                    .font(.system(size: queuedCount > 99 ? 7 : 9, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .frame(width: 17, height: 17)
-                    .background(Circle().fill(Color.green))
-                    .accessibilityLabel(queuedCount == 1 ? "1 queued item" : "\(queuedCount) queued items")
+                VStack(spacing: 8) {
+                    Image(nsImage: NSApplication.shared.applicationIconImage)
+                        .resizable()
+                        .renderingMode(.original)
+                        .interpolation(.high)
+                        .frame(width: 15, height: 15)
+                        .accessibilityHidden(true)
+
+                    if queuedCount > 0 {
+                        Text(countText)
+                            .font(.system(size: queuedCount > 99 ? 6 : 8, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.55)
+                            .frame(width: 14, height: 14)
+                            .background(Circle().fill(Color.accentColor))
+                            .accessibilityHidden(true)
+                    }
+                }
             }
+            .frame(width: tongueWidth, height: geometry.size.height)
+            .clipShape(EdgeTabShape(edge: edge, radius: 8))
+            .position(
+                x: edge == .left ? tongueWidth / 2 : geometry.size.width - tongueWidth / 2,
+                y: geometry.size.height / 2
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            ZStack {
-                VisualEffectBackground(material: .popover)
-                Color(nsColor: .windowBackgroundColor).opacity(opaque ? 0.98 : 0.78)
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-        }
         .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct EdgeTabShape: Shape {
+    var edge: PanelEdge
+    var radius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(radius, rect.width, rect.height / 2)
+        let control = radius * 0.552_284_75
+        var path = Path()
+
+        switch edge {
+        case .left:
+            path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX, y: rect.minY + radius),
+                control1: CGPoint(x: rect.maxX - radius + control, y: rect.minY),
+                control2: CGPoint(x: rect.maxX, y: rect.minY + radius - control)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+                control1: CGPoint(x: rect.maxX, y: rect.maxY - radius + control),
+                control2: CGPoint(x: rect.maxX - radius + control, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        case .right:
+            path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.minY))
+            path.addCurve(
+                to: CGPoint(x: rect.minX, y: rect.minY + radius),
+                control1: CGPoint(x: rect.minX + radius - control, y: rect.minY),
+                control2: CGPoint(x: rect.minX, y: rect.minY + radius - control)
+            )
+            path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY - radius))
+            path.addCurve(
+                to: CGPoint(x: rect.minX + radius, y: rect.maxY),
+                control1: CGPoint(x: rect.minX, y: rect.maxY - radius + control),
+                control2: CGPoint(x: rect.minX + radius - control, y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        }
+        path.closeSubpath()
+        return path
     }
 }

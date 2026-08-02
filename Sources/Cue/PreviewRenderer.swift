@@ -5,6 +5,7 @@ import SwiftUI
 @MainActor
 enum PreviewRenderer {
     static func renderAll(outputDirectory: URL) throws {
+        try installPreviewApplicationIcon()
         let model = try makePreviewModel()
         try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
         try render(view: SidecarView(model: model), size: NSSize(width: 372, height: 600), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-light.png"))
@@ -14,9 +15,37 @@ enum PreviewRenderer {
         model.updateSettings { $0.panelPinned = true }
         try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-panel-pinned.png"))
         model.updateSettings { $0.panelPinned = false }
-        let railChrome = PanelChromeModel()
-        railChrome.state = .retracted(.right)
-        try render(view: PanelRootView(model: model, chrome: railChrome), size: PanelGeometryPolicy.railSize, appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-edge-rail.png"))
+        let emptyRailModel = try makePreviewModel()
+        let emptyRailIDs = Set(emptyRailModel.document?.items.filter { $0.state == .queued }.map(\.id) ?? [])
+        emptyRailModel.archive(emptyRailIDs)
+        let leftRailChrome = PanelChromeModel()
+        leftRailChrome.state = .retracted(.left)
+        try render(
+            view: EdgeTabPreviewScene(model: emptyRailModel, chrome: leftRailChrome, edge: .left),
+            size: NSSize(width: 214, height: 136),
+            appearance: .aqua,
+            to: outputDirectory.appendingPathComponent("Cue-edge-tab-left-light-count0.png")
+        )
+
+        let rightRailChrome = PanelChromeModel()
+        rightRailChrome.state = .retracted(.right)
+        try render(
+            view: EdgeTabPreviewScene(model: model, chrome: rightRailChrome, edge: .right),
+            size: NSSize(width: 214, height: 136),
+            appearance: .darkAqua,
+            to: outputDirectory.appendingPathComponent("Cue-edge-tab-right-dark-count2.png")
+        )
+
+        let opaqueRailModel = try makePreviewModel()
+        opaqueRailModel.updateSettings { $0.reduceTranslucency = true }
+        let opaqueRailChrome = PanelChromeModel()
+        opaqueRailChrome.state = .retracted(.right)
+        try render(
+            view: EdgeTabPreviewScene(model: opaqueRailModel, chrome: opaqueRailChrome, edge: .right),
+            size: NSSize(width: 214, height: 136),
+            appearance: .aqua,
+            to: outputDirectory.appendingPathComponent("Cue-edge-tab-right-opaque-count2.png")
+        )
         model.selectedItemIDs = Set(model.visibleItems().prefix(2).map(\.id))
         model.publishReceipt(Receipt(message: "2 items copied", symbol: "doc.on.doc.fill"))
         try render(view: SidecarView(model: model), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-preview-min-batch-receipt.png"))
@@ -30,8 +59,22 @@ enum PreviewRenderer {
         try render(view: SidecarView(model: emptyModel), size: NSSize(width: 352, height: 500), appearance: .aqua, to: outputDirectory.appendingPathComponent("Cue-onboarding-min-light.png"))
     }
 
+    private static func installPreviewApplicationIcon() throws {
+        let iconURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Resources/AppIcon.icns")
+        guard let icon = NSImage(contentsOf: iconURL) else {
+            throw NSError(
+                domain: "CuePreview",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Could not load Resources/AppIcon.icns for preview rendering"]
+            )
+        }
+        NSApplication.shared.applicationIconImage = icon
+    }
+
     private static func makePreviewModel() throws -> AppModel {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CuePreview-\(UUID())", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let workspaceURL = root.appendingPathComponent("Product Launch.cue", isDirectory: true)
         let settingsStore = SettingsStore(directoryURL: root.appendingPathComponent("Settings", isDirectory: true))
         let workspaceStore = WorkspaceStore()
@@ -79,5 +122,64 @@ enum PreviewRenderer {
             throw NSError(domain: "CuePreview", code: 2, userInfo: [NSLocalizedDescriptionKey: "Could not encode preview PNG"])
         }
         try data.write(to: url)
+    }
+}
+
+@MainActor
+private struct EdgeTabPreviewScene: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var chrome: PanelChromeModel
+    var edge: PanelEdge
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if edge == .left { outsideDisplay }
+            screenSurface
+            if edge == .right { outsideDisplay }
+        }
+        .background(Color(nsColor: .underPageBackgroundColor))
+    }
+
+    private var screenSurface: some View {
+        ZStack {
+            Color(nsColor: .windowBackgroundColor)
+
+            VStack(alignment: .leading, spacing: 11) {
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(0.11))
+                    .frame(width: 112, height: 8)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.065))
+                    .frame(width: 146, height: 6)
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.065))
+                    .frame(width: 128, height: 6)
+            }
+            .padding(.horizontal, 30)
+            .padding(.top, 25)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            HStack(spacing: 0) {
+                if edge == .right { Spacer(minLength: 0) }
+                PanelRootView(model: model, chrome: chrome)
+                    .frame(width: PanelGeometryPolicy.railSize.width, height: PanelGeometryPolicy.railSize.height)
+                if edge == .left { Spacer(minLength: 0) }
+            }
+        }
+    }
+
+    private var outsideDisplay: some View {
+        ZStack {
+            Color(nsColor: .controlBackgroundColor)
+            Rectangle()
+                .fill(Color.primary.opacity(0.045))
+                .padding(.horizontal, 7)
+        }
+        .frame(width: 24)
+        .overlay(alignment: edge == .left ? .trailing : .leading) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.28))
+                .frame(width: 1)
+        }
     }
 }
