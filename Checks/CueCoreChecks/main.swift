@@ -228,6 +228,633 @@ private func checkItemRecordCodec() {
     }
 }
 
+private func checkPackagePlan() {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory.appendingPathComponent("CuePackagePlanChecks-\(UUID())", isDirectory: true)
+
+    func entryType(at url: URL) throws -> FileAttributeType {
+        try fileManager.attributesOfItem(atPath: url.path)[.type] as! FileAttributeType
+    }
+
+    func treeState(at url: URL) throws -> [String: Data] {
+        var state: [String: Data] = [:]
+        func walk(_ current: URL, relative: String) throws {
+            let type = try entryType(at: current)
+            var value = Data(type.rawValue.utf8)
+            if type == .typeSymbolicLink {
+                value.append(Data((try fileManager.destinationOfSymbolicLink(atPath: current.path)).utf8))
+            } else if type == .typeRegular {
+                value.append(try Data(contentsOf: current))
+            }
+            state[relative] = value
+            guard type == .typeDirectory else { return }
+            for child in try fileManager.contentsOfDirectory(at: current, includingPropertiesForKeys: nil, options: [])
+                .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                let childRelative = relative == "." ? child.lastPathComponent : "\(relative)/\(child.lastPathComponent)"
+                try walk(child, relative: childRelative)
+            }
+        }
+        try walk(url, relative: ".")
+        return state
+    }
+
+    func parentNames(of url: URL) throws -> [String] {
+        try fileManager.contentsOfDirectory(atPath: url.deletingLastPathComponent().path).sorted()
+    }
+
+    func itemFile(in package: URL, suffix: String) throws -> URL {
+        let items = package.appendingPathComponent("items", isDirectory: true)
+        guard let enumerator = fileManager.enumerator(at: items, includingPropertiesForKeys: nil) else {
+            throw WorkspaceStoreError.invalidDocument("test fixture has no item enumerator")
+        }
+        for case let candidate as URL in enumerator where candidate.lastPathComponent.hasSuffix(suffix) {
+            if try entryType(at: candidate) == .typeRegular { return candidate }
+        }
+        throw WorkspaceStoreError.invalidDocument("test fixture has no item file")
+    }
+
+    func writePlan(_ plan: CueSchema3PackagePlan, to package: URL) throws {
+        try fileManager.createDirectory(at: package, withIntermediateDirectories: false)
+        for directory in plan.directories {
+            try fileManager.createDirectory(
+                at: package.appendingPathComponent(directory, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        for file in plan.files {
+            let destination = package.appendingPathComponent(file.path)
+            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try file.data.write(to: destination)
+        }
+    }
+
+    func rewriteManifest(at package: URL, mutate: (inout [String: Any]) -> Void) throws {
+        let manifestURL = package.appendingPathComponent("manifest.yaml")
+        try rewriteJSONObject(at: manifestURL, mutate: mutate)
+    }
+
+    func rewriteJSONObject(at url: URL, mutate: (inout [String: Any]) -> Void) throws {
+        var object = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        mutate(&object)
+        var data = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        data.append(0x0A)
+        try data.write(to: url)
+    }
+
+    func prependJSONMember(_ member: String, at url: URL) throws {
+        var text = try String(contentsOf: url, encoding: .utf8)
+        guard let opening = text.firstIndex(of: "{") else {
+            throw WorkspaceStoreError.invalidDocument("test fixture has no JSON object")
+        }
+        text.insert(contentsOf: "\(member),", at: text.index(after: opening))
+        try Data(text.utf8).write(to: url)
+    }
+
+    func copyPackage(_ source: URL, named name: String) throws -> URL {
+        let destination = root.appendingPathComponent("\(name).cue", isDirectory: true)
+        try fileManager.copyItem(at: source, to: destination)
+        return destination
+    }
+
+    func expectInvalid(_ package: URL, _ name: String) {
+        do {
+            let before = try treeState(at: package)
+            let siblings = try parentNames(of: package)
+            do {
+                _ = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: package)
+                check(false, name)
+            } catch WorkspaceStoreError.invalidDocument {
+                check(true, name)
+            } catch {
+                check(false, "\(name) (unexpected error: \(error))")
+            }
+            check(try treeState(at: package) == before && parentNames(of: package) == siblings, "\(name) is observational")
+        } catch {
+            check(false, "\(name) fixture: \(error)")
+        }
+    }
+
+    do {
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
+        let schema2URL = root.appendingPathComponent("source.cue", isDirectory: true)
+        var source = sampleDocument()
+        let exactBody = "Case Fold\r\nNUL:\0\ndecomposed: e\u{0301}\nno final newline"
+        source.items[0].body = exactBody
+        source.items[0].contentHash = ContentHasher.hash(exactBody)
+        _ = try WorkspaceStore().create(document: source, at: schema2URL)
+
+        let legacyItemURL = try itemFile(in: schema2URL, suffix: ".md")
+        var legacyText = try String(contentsOf: legacyItemURL, encoding: .utf8)
+        legacyText = legacyText.replacingOccurrences(
+            of: #""source":{"#,
+            with: #""source":{"future_source":{"keep":true},"#
+        )
+        let metadataEnd = legacyText.range(of: " -->\n")!.lowerBound
+        let insertAt = legacyText.index(before: metadataEnd)
+        legacyText.insert(contentsOf: #", "future_item" : {"keep":"yes"}"#, at: insertAt)
+        try Data(legacyText.utf8).write(to: legacyItemURL)
+
+        let tombstoneURL = schema2URL.appendingPathComponent("tombstones/\(source.items[0].id.uuidString.lowercased()).json")
+        let legacyTombstone = """
+        {"cue_workspace_id":"\(source.id.uuidString)","item_id":"\(source.items[0].id.uuidString)","deleted_at":"2020-01-01T00:00:00Z"}
+        """
+        try Data(legacyTombstone.utf8).write(to: tombstoneURL)
+
+        let before = try treeState(at: schema2URL)
+        let parentBefore = try parentNames(of: schema2URL)
+        let legacyInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema2URL)
+        let plan = try CuePackagePlanner.planSchema3Migration(from: legacyInspection)
+        check(try treeState(at: schema2URL) == before, "schema-2 inspection and planning preserve every package path, type, and byte")
+        check(try parentNames(of: schema2URL) == parentBefore, "schema-2 planning creates no sibling stage, backup, or conflict copy")
+        check(legacyInspection.writeCapability == .requiresVerifiedSchema2Migration, "schema-2 inspection exposes verified-migration capability")
+        check(legacyInspection.document?.items.count == 1 && legacyInspection.conflicts.count == 1, "schema-2 manifest membership stays authoritative and clock tombstones preserve edits")
+        check(plan.sourcePackageRevision == legacyInspection.packageRevision, "migration plan binds the observed recursive path and byte revision")
+
+        let manifestData = plan.files.first(where: { $0.path == "manifest.yaml" })!.data
+        let manifestObject = try JSONSerialization.jsonObject(with: manifestData) as! [String: Any]
+        check(Set(manifestObject.keys) == Set(["cue_schema", "cue_workspace_id", "title", "required_features"]), "schema-3 manifest has exactly four membership-free keys")
+        check(manifestObject["items"] == nil && manifestObject["sections"] == nil, "schema-3 manifest stores no item or section membership")
+
+        let plannedItem = plan.files.first(where: { $0.path.hasSuffix(".cue.md") })!
+        check(plannedItem.data.range(of: Data(#""future_item" : {"keep":"yes"}"#.utf8)) != nil, "migration preserves unknown schema-2 item metadata")
+        check(plannedItem.data.range(of: Data(#""future_source":{"keep":true}"#.utf8)) != nil, "migration preserves unknown schema-2 source metadata")
+        check(plannedItem.data.suffix(Data(exactBody.utf8).count) == Data(exactBody.utf8), "migration preserves exact schema-2 Markdown body bytes")
+
+        let schema3URL = root.appendingPathComponent("planned.cue", isDirectory: true)
+        try writePlan(plan, to: schema3URL)
+        var schema3 = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(schema3.writeCapability == .writableSchema3 && schema3.document?.items.count == 1, "verified schema-3 plan reopens through the public inventory owner")
+        check(schema3.workspaceID == legacyInspection.workspaceID && schema3.title == legacyInspection.title && schema3.document?.sections == legacyInspection.document?.sections && schema3.document?.items == legacyInspection.document?.items && schema3.tombstones == legacyInspection.tombstones, "verified migration plan preserves the complete workspace, section, item, body, and tombstone closure")
+        let migratedDeletedAt = ISO8601DateFormatter().date(from: "2020-01-01T00:00:00Z")!
+        check(schema3.conflicts == [.legacyDeleteEdit(itemID: source.items[0].id, recordRevision: schema3.itemRecords[0].revision, deletedAt: migratedDeletedAt)], "migrated legacyUnbound tombstone retains the exact typed conflict evidence")
+
+        let stableManifest = try Data(contentsOf: schema3URL.appendingPathComponent("manifest.yaml"))
+        let secondID = UUID()
+        var secondItem = source.items[0]
+        secondItem.id = secondID
+        secondItem.body = "Directory member"
+        secondItem.contentHash = ContentHasher.hash(secondItem.body)
+        let secondPath = schema3URL.appendingPathComponent("items/2023/11/\(secondID.uuidString.lowercased()).cue.md")
+        try CueItemRecordCodec.encode(CueItemRecord(workspaceID: source.id, item: secondItem)).write(to: secondPath)
+        schema3 = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let unchangedManifest = try Data(contentsOf: schema3URL.appendingPathComponent("manifest.yaml"))
+        check(schema3.itemRecords.count == 2 && unchangedManifest == stableManifest, "schema-3 item membership derives from the directory while manifest bytes stay unchanged")
+        try fileManager.removeItem(at: secondPath)
+        let afterDirectoryRemoval = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let removalManifest = try Data(contentsOf: schema3URL.appendingPathComponent("manifest.yaml"))
+        check(afterDirectoryRemoval.itemRecords.count == 1 && removalManifest == stableManifest, "schema-3 directory removal updates membership without changing manifest bytes")
+
+        let currentItemURL = try itemFile(in: schema3URL, suffix: ".cue.md")
+        let currentInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let current = currentInspection.itemRecords[0]
+        let originalMTime = Date(timeIntervalSince1970: 1_800_000_000)
+        try fileManager.setAttributes([.modificationDate: originalMTime], ofItemAtPath: currentItemURL.path)
+        let beforeMTimeOnly = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        try fileManager.setAttributes([.modificationDate: originalMTime.addingTimeInterval(100)], ofItemAtPath: currentItemURL.path)
+        let afterMTimeOnly = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(beforeMTimeOnly.itemRecords[0].revision == afterMTimeOnly.itemRecords[0].revision && beforeMTimeOnly.packageRevision == afterMTimeOnly.packageRevision, "exact revisions exclude mtime")
+
+        var caseEdit = current.record
+        caseEdit.item.body = "case fold\r\nNUL:\0\ndecomposed: e\u{0301}\nno final newline"
+        check(ContentHasher.hash(caseEdit.item.body) == ContentHasher.hash(current.record.item.body), "revision counterexample keeps the normalized content hash equal")
+        let changedBytes = try CueItemRecordCodec.encode(caseEdit)
+        check(changedBytes.count == current.data.count, "revision counterexample keeps record size equal")
+        try changedBytes.write(to: currentItemURL)
+        let changedInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let changed = changedInspection.itemRecords[0]
+        check(changed.revision != current.revision, "record revision hashes exact complete cue.md bytes")
+        check(changedInspection.packageRevision != currentInspection.packageRevision, "package revision changes for an equal-size equal-ContentHasher record byte edit")
+
+        let observedTombstone = """
+        {"cue_schema":3,"cue_workspace_id":"\(source.id.uuidString)","item_id":"\(source.items[0].id.uuidString)","kind":"observed","observed_revision":"\(current.revision.rawValue)"}
+        """
+        try Data(observedTombstone.utf8).write(to: tombstoneURLFor(schema3URL, itemID: source.items[0].id))
+        let divergent = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(divergent.document?.items.count == 1 && divergent.tombstones.count == 1, "divergent edit/delete retains both record and tombstone")
+        check(divergent.conflicts == [.editDelete(itemID: source.items[0].id, recordRevision: changed.revision, observedRevision: current.revision)], "divergent edit/delete exposes both exact revisions in a typed conflict")
+
+        try current.data.write(to: currentItemURL)
+        let equalDelete = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(equalDelete.document?.items.isEmpty == true && equalDelete.itemRecords.count == 1 && equalDelete.conflicts.isEmpty, "equal observed tombstone suppresses the matching record without losing raw evidence")
+
+        let earlyLegacy = """
+        {"cue_schema":3,"cue_workspace_id":"\(source.id.uuidString)","item_id":"\(source.items[0].id.uuidString)","kind":"legacy_unbound","deleted_at":"1999-01-01T00:00:00Z"}
+        """
+        try Data(earlyLegacy.utf8).write(to: tombstoneURLFor(schema3URL, itemID: source.items[0].id))
+        let early = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let lateLegacy = earlyLegacy.replacingOccurrences(of: "1999-01-01", with: "2099-01-01")
+        try Data(lateLegacy.utf8).write(to: tombstoneURLFor(schema3URL, itemID: source.items[0].id))
+        let late = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        let dateFormatter = ISO8601DateFormatter()
+        let earlyDate = dateFormatter.date(from: "1999-01-01T00:00:00Z")!
+        let lateDate = dateFormatter.date(from: "2099-01-01T00:00:00Z")!
+        check(early.conflicts == [.legacyDeleteEdit(itemID: source.items[0].id, recordRevision: early.itemRecords[0].revision, deletedAt: earlyDate)], "early legacyUnbound exposes an exact typed conflict without dominance")
+        check(late.conflicts == [.legacyDeleteEdit(itemID: source.items[0].id, recordRevision: late.itemRecords[0].revision, deletedAt: lateDate)], "late legacyUnbound exposes an exact typed conflict without dominance")
+
+        try fileManager.removeItem(at: currentItemURL)
+        let legacyWithoutRecord = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(legacyWithoutRecord.document?.items.isEmpty == true && legacyWithoutRecord.tombstones.count == 1 && legacyWithoutRecord.conflicts.isEmpty, "legacyUnbound without a record remains audit evidence without inventing a conflict")
+        try Data(observedTombstone.utf8).write(to: tombstoneURLFor(schema3URL, itemID: source.items[0].id))
+        let deleted = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: schema3URL)
+        check(deleted.document?.items.isEmpty == true && deleted.conflicts.isEmpty, "observed tombstone without a record is a clean deletion")
+
+        let newer = try copyPackage(schema3URL, named: "newer")
+        try rewriteManifest(at: newer) { $0["cue_schema"] = 4 }
+        check(try CuePackagePlanner.inspect(atCoordinatedAccessorURL: newer).writeCapability == .readOnly(.newerSchema(4)), "newer schema is a typed read-only capability")
+        let feature = try copyPackage(schema3URL, named: "feature")
+        try rewriteManifest(at: feature) { $0["required_features"] = ["future_assets"] }
+        check(try CuePackagePlanner.inspect(atCoordinatedAccessorURL: feature).writeCapability == .readOnly(.unsupportedRequiredFeatures(["future_assets"])), "unsupported required feature is a typed read-only capability")
+
+        let extraManifest = try copyPackage(schema3URL, named: "extra-manifest")
+        try rewriteManifest(at: extraManifest) { $0["items"] = [] }
+        expectInvalid(extraManifest, "schema-3 manifest rejects membership and every fifth key")
+        let duplicateFeatures = try copyPackage(schema3URL, named: "duplicate-features")
+        try rewriteManifest(at: duplicateFeatures) { $0["required_features"] = ["known", "known"] }
+        expectInvalid(duplicateFeatures, "schema-3 manifest rejects duplicate required features")
+
+        let unlistedURL = try copyPackage(schema2URL, named: "unlisted")
+        var unlistedItem = source.items[0]
+        unlistedItem.id = UUID()
+        let unlistedPath = unlistedURL.appendingPathComponent("items/2023/11/\(unlistedItem.id.uuidString.lowercased()).md")
+        let listedLegacyData = try Data(contentsOf: itemFile(in: unlistedURL, suffix: ".md"))
+        let unlistedData = String(data: listedLegacyData, encoding: .utf8)!
+            .replacingOccurrences(of: source.items[0].id.uuidString, with: unlistedItem.id.uuidString)
+        try Data(unlistedData.utf8).write(to: unlistedPath)
+        let unlistedInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: unlistedURL)
+        check(unlistedInspection.document?.items.count == 1 && unlistedInspection.unlistedManagedPaths.count == 1, "schema-2 open keeps manifest membership authoritative")
+        check(unlistedInspection.writeCapability == .readOnly(.unlistedLegacyManagedRecords(unlistedInspection.unlistedManagedPaths)), "unlisted schema-2 managed records are a typed read-only reason")
+        do {
+            _ = try CuePackagePlanner.planSchema3Migration(from: unlistedInspection)
+            check(false, "unlisted schema-2 managed record blocks migration")
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, "unlisted schema-2 managed record blocks migration")
+        }
+
+        check(CueRecordRevision(rawValue: String(repeating: "a", count: 64)) != nil && CueRecordRevision(rawValue: String(repeating: "A", count: 64)) == nil, "record revisions accept only lowercase ASCII SHA-256")
+        check(CuePackageRevision(rawValue: String(repeating: "1", count: 64)) != nil && CuePackageRevision(rawValue: String(repeating: "１", count: 64)) == nil, "package revisions reject non-ASCII digits")
+
+        let pureURL = try copyPackage(schema2URL, named: "pure-plan-source")
+        let pureInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: pureURL)
+        try rewriteManifest(at: pureURL) { $0["title"] = "Changed after inspection" }
+        let purePlan = try CuePackagePlanner.planSchema3Migration(from: pureInspection)
+        let pureManifestData = purePlan.files.first(where: { $0.path == "manifest.yaml" })!.data
+        let pureManifest = try JSONSerialization.jsonObject(with: pureManifestData) as! [String: Any]
+        check(pureManifest["title"] as? String == source.title, "migration planning is pure over the retained one-read inspection")
+
+        let unknownManifestURL = try copyPackage(schema2URL, named: "unknown-legacy-manifest")
+        try rewriteManifest(at: unknownManifestURL) { $0["future_manifest"] = ["keep": true] }
+        let unknownManifestInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: unknownManifestURL)
+        check(unknownManifestInspection.writeCapability == .readOnly(.unknownLegacyManifestMetadata(["future_manifest"])), "unknown schema-2 manifest metadata is a typed read-only reason")
+        do {
+            _ = try CuePackagePlanner.planSchema3Migration(from: unknownManifestInspection)
+            check(false, "unknown schema-2 manifest metadata blocks migration")
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, "unknown schema-2 manifest metadata blocks migration")
+        }
+
+        let collisionURL = try copyPackage(schema2URL, named: "legacy-item-collision")
+        let collisionItemURL = try itemFile(in: collisionURL, suffix: ".md")
+        var collisionText = try String(contentsOf: collisionItemURL, encoding: .utf8)
+        let collisionMetadataEnd = collisionText.range(of: " -->\n")!.lowerBound
+        collisionText.insert(
+            contentsOf: #", "\u0073chema" : "future", "workspace_id" : "future""#,
+            at: collisionText.index(before: collisionMetadataEnd)
+        )
+        try Data(collisionText.utf8).write(to: collisionItemURL)
+        let collisionInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: collisionURL)
+        let resolvedCollisionURL = collisionURL.resolvingSymlinksInPath()
+        let resolvedCollisionItemURL = collisionItemURL.resolvingSymlinksInPath()
+        let collisionPath = String(resolvedCollisionItemURL.path.dropFirst(resolvedCollisionURL.path.count + 1))
+        var collisionKeys: [String] = []
+        if case let .readOnly(.unpreservableLegacyItemMetadata(keys)) = collisionInspection.writeCapability {
+            collisionKeys = keys
+        }
+        check(
+            collisionKeys.count == 2 &&
+                collisionKeys.allSatisfy { $0.hasPrefix("\(collisionPath)#") } &&
+                collisionKeys.contains(where: { $0.hasSuffix("#schema") }) &&
+                collisionKeys.contains(where: { $0.hasSuffix("#workspace_id") }),
+            "escaped and plain legacy item key collisions are a typed read-only reason"
+        )
+        do {
+            _ = try CuePackagePlanner.planSchema3Migration(from: collisionInspection)
+            check(false, "unpreservable legacy item metadata blocks migration during inspection")
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, "unpreservable legacy item metadata blocks migration during inspection")
+        }
+
+        let legacyAssetURL = try copyPackage(schema2URL, named: "legacy-assets")
+        let legacyAsset = legacyAssetURL.appendingPathComponent("assets/sha256/\(String(repeating: "a", count: 64))")
+        try Data("reserved".utf8).write(to: legacyAsset)
+        let legacyAssetInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: legacyAssetURL)
+        check(legacyAssetInspection.writeCapability == .readOnly(.nonemptyAssets(["assets/sha256/\(String(repeating: "a", count: 64))"])), "nonempty schema-2 assets are typed read-only before T-007")
+        do {
+            _ = try CuePackagePlanner.planSchema3Migration(from: legacyAssetInspection)
+            check(false, "B2 never copies nonempty legacy assets into a plan")
+        } catch WorkspaceStoreError.invalidDocument {
+            check(true, "B2 never copies nonempty legacy assets into a plan")
+        }
+
+        let validationBase = root.appendingPathComponent("validation-base.cue", isDirectory: true)
+        try writePlan(plan, to: validationBase)
+
+        let malformedManifest = try copyPackage(validationBase, named: "malformed-manifest")
+        try rewriteManifest(at: malformedManifest) { $0["title"] = 3 }
+        expectInvalid(malformedManifest, "malformed manifest stays typed invalidDocument")
+        let malformedSection = try copyPackage(validationBase, named: "malformed-section")
+        let malformedSectionURL = malformedSection.appendingPathComponent(
+            "sections/\(source.sections[0].id.uuidString.lowercased()).yaml"
+        )
+        try rewriteJSONObject(at: malformedSectionURL) { $0["title"] = 3 }
+        expectInvalid(malformedSection, "malformed section stays typed invalidDocument")
+        let malformedTombstone = try copyPackage(validationBase, named: "malformed-tombstone")
+        try rewriteJSONObject(at: tombstoneURLFor(malformedTombstone, itemID: source.items[0].id)) {
+            $0["kind"] = 3
+        }
+        expectInvalid(malformedTombstone, "malformed tombstone stays typed invalidDocument")
+
+        let missingPackage = root.appendingPathComponent("missing.cue", isDirectory: true)
+        do {
+            _ = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: missingPackage)
+            check(false, "missing package root stays typed missingFile")
+        } catch WorkspaceStoreError.missingFile {
+            check(true, "missing package root stays typed missingFile")
+        } catch {
+            check(false, "missing package root stays typed missingFile (unexpected error: \(error))")
+        }
+
+        do {
+            let unreadablePackage = try copyPackage(validationBase, named: "unreadable-items")
+            let unreadableItems = unreadablePackage.appendingPathComponent("items", isDirectory: true)
+            let originalPermissions = try fileManager.attributesOfItem(atPath: unreadableItems.path)[.posixPermissions]!
+            try fileManager.setAttributes([.posixPermissions: 0], ofItemAtPath: unreadableItems.path)
+            defer {
+                do {
+                    try fileManager.setAttributes(
+                        [.posixPermissions: originalPermissions],
+                        ofItemAtPath: unreadableItems.path
+                    )
+                    try fileManager.removeItem(at: unreadablePackage)
+                } catch {
+                    failed += 1
+                    print("FAIL  filesystem permission fixture cleanup: \(error)")
+                }
+            }
+            do {
+                _ = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: unreadablePackage)
+                check(false, "filesystem read permission failure preserves its Cocoa error")
+            } catch WorkspaceStoreError.invalidDocument {
+                check(false, "filesystem read permission failure is not mislabeled invalidDocument")
+            } catch let error as CocoaError {
+                check(
+                    error.code == .fileReadNoPermission,
+                    "filesystem read permission failure preserves its Cocoa error"
+                )
+            } catch {
+                check(false, "filesystem read permission failure preserves its Cocoa error (unexpected error: \(error))")
+            }
+        }
+
+        let validationManifest = try Data(contentsOf: validationBase.appendingPathComponent("manifest.yaml"))
+        let addedSectionID = UUID()
+        let addedSectionURL = validationBase.appendingPathComponent("sections/\(addedSectionID.uuidString.lowercased()).yaml")
+        let addedSection = """
+        {"schema":3,"workspace_id":"\(source.id.uuidString)","id":"\(addedSectionID.uuidString)","title":"Added","order":2,"is_collapsed":false}
+        """
+        try Data(addedSection.utf8).write(to: addedSectionURL)
+        let withSection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: validationBase)
+        let sectionManifest = try Data(contentsOf: validationBase.appendingPathComponent("manifest.yaml"))
+        check(withSection.document?.sections.count == 2 && sectionManifest == validationManifest, "schema-3 section membership derives from the directory while manifest bytes stay unchanged")
+        try fileManager.removeItem(at: addedSectionURL)
+
+        let assetRevisionURL = try copyPackage(validationBase, named: "asset-path-revision")
+        let firstAssetURL = assetRevisionURL.appendingPathComponent("assets/sha256/\(String(repeating: "a", count: 64))")
+        let secondAssetURL = assetRevisionURL.appendingPathComponent("assets/sha256/\(String(repeating: "b", count: 64))")
+        try Data("same bytes".utf8).write(to: firstAssetURL)
+        let firstAssetInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: assetRevisionURL)
+        try fileManager.moveItem(at: firstAssetURL, to: secondAssetURL)
+        let secondAssetInspection = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: assetRevisionURL)
+        check(firstAssetInspection.packageRevision != secondAssetInspection.packageRevision, "package revision binds canonical relative paths as well as bytes")
+        check(firstAssetInspection.writeCapability == .readOnly(.nonemptyAssets(["assets/sha256/\(String(repeating: "a", count: 64))"])), "nonempty schema-3 assets stay typed read-only in B2")
+
+        let badFeatureLexeme = try copyPackage(validationBase, named: "bad-feature-lexeme")
+        try rewriteManifest(at: badFeatureLexeme) { $0["required_features"] = ["ｆｕｔｕｒｅ"] }
+        expectInvalid(badFeatureLexeme, "required feature names reject non-ASCII letters")
+        let badDateLexeme = try copyPackage(validationBase, named: "bad-date-lexeme")
+        let badDateTombstone = tombstoneURLFor(badDateLexeme, itemID: source.items[0].id)
+        try rewriteJSONObject(at: badDateTombstone) { $0["deleted_at"] = "２０２０-01-01T00:00:00Z" }
+        expectInvalid(badDateLexeme, "tombstone dates reject non-ASCII year digits")
+        let uppercaseAssetHash = try copyPackage(validationBase, named: "uppercase-asset-hash")
+        try Data("x".utf8).write(to: uppercaseAssetHash.appendingPathComponent("assets/sha256/\(String(repeating: "A", count: 64))"))
+        expectInvalid(uppercaseAssetHash, "asset paths reject uppercase SHA-256 lexemes")
+        let nonASCIIAssetHash = try copyPackage(validationBase, named: "non-ascii-asset-hash")
+        try Data("x".utf8).write(to: nonASCIIAssetHash.appendingPathComponent("assets/sha256/\(String(repeating: "１", count: 64))"))
+        expectInvalid(nonASCIIAssetHash, "asset paths reject non-ASCII SHA-256 lexemes")
+
+        let badSectionSchema = try copyPackage(validationBase, named: "bad-section-schema")
+        let badSectionSchemaURL = badSectionSchema.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        try rewriteJSONObject(at: badSectionSchemaURL) { $0["schema"] = 4 }
+        expectInvalid(badSectionSchema, "schema-3 section rejects unsupported schema")
+        let badSectionWorkspace = try copyPackage(validationBase, named: "bad-section-workspace")
+        let badSectionWorkspaceURL = badSectionWorkspace.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        try rewriteJSONObject(at: badSectionWorkspaceURL) { $0["workspace_id"] = UUID().uuidString }
+        expectInvalid(badSectionWorkspace, "schema-3 section rejects workspace mismatch")
+        let badSectionID = try copyPackage(validationBase, named: "bad-section-id")
+        let badSectionIDURL = badSectionID.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        try rewriteJSONObject(at: badSectionIDURL) { $0["id"] = UUID().uuidString }
+        expectInvalid(badSectionID, "schema-3 section rejects filename and record ID mismatch")
+        let duplicateSectionWorkspace = try copyPackage(validationBase, named: "duplicate-section-workspace")
+        let duplicateSectionWorkspaceURL = duplicateSectionWorkspace.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        try prependJSONMember(#""\u0077orkspace_id":"\#(source.id.uuidString)""#, at: duplicateSectionWorkspaceURL)
+        expectInvalid(duplicateSectionWorkspace, "schema-3 section rejects escaped duplicate workspace identity")
+        let duplicateLegacySectionID = try copyPackage(schema2URL, named: "duplicate-legacy-section-id")
+        let duplicateLegacySectionURL = duplicateLegacySectionID.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        try prependJSONMember(#""\u0069d":"\#(source.sections[0].id.uuidString)""#, at: duplicateLegacySectionURL)
+        expectInvalid(duplicateLegacySectionID, "schema-2 section rejects escaped duplicate record identity")
+
+        let badItemID = try copyPackage(validationBase, named: "bad-item-id")
+        let badItemIDURL = try itemFile(in: badItemID, suffix: ".cue.md")
+        let renamedItemURL = badItemIDURL.deletingLastPathComponent().appendingPathComponent("\(UUID().uuidString.lowercased()).cue.md")
+        try fileManager.moveItem(at: badItemIDURL, to: renamedItemURL)
+        expectInvalid(badItemID, "schema-3 item rejects filename and record ID mismatch")
+
+        let badItemDate = try copyPackage(validationBase, named: "bad-item-date")
+        let badItemDateURL = try itemFile(in: badItemDate, suffix: ".cue.md")
+        let wrongMonth = badItemDate.appendingPathComponent("items/2023/12", isDirectory: true)
+        try fileManager.createDirectory(at: wrongMonth, withIntermediateDirectories: true)
+        try fileManager.moveItem(at: badItemDateURL, to: wrongMonth.appendingPathComponent(badItemDateURL.lastPathComponent))
+        expectInvalid(badItemDate, "schema-3 item rejects UTC created_at path mismatch")
+
+        let badItemWorkspace = try copyPackage(validationBase, named: "bad-item-workspace")
+        let badItemWorkspaceURL = try itemFile(in: badItemWorkspace, suffix: ".cue.md")
+        var workspaceRecord = try CueItemRecordCodec.decode(Data(contentsOf: badItemWorkspaceURL))
+        workspaceRecord.workspaceID = UUID()
+        try CueItemRecordCodec.encode(workspaceRecord).write(to: badItemWorkspaceURL)
+        expectInvalid(badItemWorkspace, "schema-3 item rejects workspace mismatch")
+
+        let badSectionReference = try copyPackage(validationBase, named: "bad-section-reference")
+        let badSectionReferenceURL = try itemFile(in: badSectionReference, suffix: ".cue.md")
+        var missingSectionRecord = try CueItemRecordCodec.decode(Data(contentsOf: badSectionReferenceURL))
+        missingSectionRecord.item.sectionID = UUID()
+        try CueItemRecordCodec.encode(missingSectionRecord).write(to: badSectionReferenceURL)
+        expectInvalid(badSectionReference, "schema-3 item rejects nonexistent section reference")
+
+        let duplicateItem = try copyPackage(validationBase, named: "duplicate-item")
+        let duplicateSourceURL = try itemFile(in: duplicateItem, suffix: ".cue.md")
+        var duplicateRecord = try CueItemRecordCodec.decode(Data(contentsOf: duplicateSourceURL))
+        duplicateRecord.item.createdAt = ISO8601DateFormatter().date(from: "2024-12-01T00:00:00Z")!
+        let duplicateURL = duplicateItem.appendingPathComponent("items/2024/12/\(duplicateRecord.item.id.uuidString.lowercased()).cue.md")
+        try fileManager.createDirectory(at: duplicateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try CueItemRecordCodec.encode(duplicateRecord).write(to: duplicateURL)
+        expectInvalid(duplicateItem, "schema-3 inventory rejects duplicate item IDs across individually valid UTC paths")
+
+        let badTombstoneWorkspace = try copyPackage(validationBase, named: "bad-tombstone-workspace")
+        let badTombstoneWorkspaceURL = tombstoneURLFor(badTombstoneWorkspace, itemID: source.items[0].id)
+        try rewriteJSONObject(at: badTombstoneWorkspaceURL) { $0["cue_workspace_id"] = UUID().uuidString }
+        expectInvalid(badTombstoneWorkspace, "schema-3 tombstone rejects workspace mismatch")
+        let badTombstoneID = try copyPackage(validationBase, named: "bad-tombstone-id")
+        let badTombstoneIDURL = tombstoneURLFor(badTombstoneID, itemID: source.items[0].id)
+        try fileManager.moveItem(
+            at: badTombstoneIDURL,
+            to: badTombstoneIDURL.deletingLastPathComponent().appendingPathComponent("\(UUID().uuidString.lowercased()).json")
+        )
+        expectInvalid(badTombstoneID, "schema-3 tombstone rejects filename and record ID mismatch")
+
+        let rootTarget = try copyPackage(validationBase, named: "root-link-target")
+        let rootLink = root.appendingPathComponent("root-link.cue", isDirectory: true)
+        try fileManager.createSymbolicLink(atPath: rootLink.path, withDestinationPath: rootTarget.path)
+        expectInvalid(rootLink, "package root symbolic link is rejected")
+
+        let manifestLink = try copyPackage(validationBase, named: "manifest-link")
+        let manifestLinkURL = manifestLink.appendingPathComponent("manifest.yaml")
+        let manifestTarget = root.appendingPathComponent("manifest-link-target.json")
+        try fileManager.moveItem(at: manifestLinkURL, to: manifestTarget)
+        try fileManager.createSymbolicLink(atPath: manifestLinkURL.path, withDestinationPath: manifestTarget.path)
+        expectInvalid(manifestLink, "manifest symbolic link is rejected")
+
+        for controlled in ["sections", "items", "tombstones", "assets"] {
+            let package = try copyPackage(validationBase, named: "\(controlled)-link")
+            let controlledURL = package.appendingPathComponent(controlled, isDirectory: true)
+            let target = root.appendingPathComponent("\(controlled)-link-target", isDirectory: true)
+            try fileManager.moveItem(at: controlledURL, to: target)
+            try fileManager.createSymbolicLink(atPath: controlledURL.path, withDestinationPath: target.path)
+            expectInvalid(package, "controlled \(controlled) directory symbolic link is rejected")
+        }
+
+        let yearLink = try copyPackage(validationBase, named: "year-link")
+        let yearURL = yearLink.appendingPathComponent("items/2023", isDirectory: true)
+        let yearTarget = root.appendingPathComponent("year-link-target", isDirectory: true)
+        try fileManager.moveItem(at: yearURL, to: yearTarget)
+        try fileManager.createSymbolicLink(atPath: yearURL.path, withDestinationPath: yearTarget.path)
+        expectInvalid(yearLink, "item intermediate directory symbolic link is rejected")
+
+        let itemLink = try copyPackage(validationBase, named: "item-link")
+        let itemLinkURL = try itemFile(in: itemLink, suffix: ".cue.md")
+        let itemTarget = root.appendingPathComponent("item-link-target.cue.md")
+        try fileManager.moveItem(at: itemLinkURL, to: itemTarget)
+        try fileManager.createSymbolicLink(atPath: itemLinkURL.path, withDestinationPath: itemTarget.path)
+        expectInvalid(itemLink, "item record symbolic link is rejected")
+
+        let sectionLink = try copyPackage(validationBase, named: "section-link")
+        let sectionLinkURL = sectionLink.appendingPathComponent("sections/\(source.sections[0].id.uuidString.lowercased()).yaml")
+        let sectionTarget = root.appendingPathComponent("section-link-target.yaml")
+        try fileManager.moveItem(at: sectionLinkURL, to: sectionTarget)
+        try fileManager.createSymbolicLink(atPath: sectionLinkURL.path, withDestinationPath: sectionTarget.path)
+        expectInvalid(sectionLink, "section record symbolic link is rejected")
+
+        let tombstoneLink = try copyPackage(validationBase, named: "tombstone-link")
+        let tombstoneLinkURL = tombstoneURLFor(tombstoneLink, itemID: source.items[0].id)
+        let tombstoneTarget = root.appendingPathComponent("tombstone-link-target.json")
+        try fileManager.moveItem(at: tombstoneLinkURL, to: tombstoneTarget)
+        try fileManager.createSymbolicLink(atPath: tombstoneLinkURL.path, withDestinationPath: tombstoneTarget.path)
+        expectInvalid(tombstoneLink, "tombstone record symbolic link is rejected")
+
+        let danglingLink = try copyPackage(validationBase, named: "dangling-link")
+        let danglingURL = danglingLink.appendingPathComponent("sections/ignored.txt")
+        try fileManager.createSymbolicLink(atPath: danglingURL.path, withDestinationPath: root.appendingPathComponent("missing-target").path)
+        expectInvalid(danglingLink, "dangling wrong-extension symbolic link is rejected before filtering")
+
+        let rootFile = root.appendingPathComponent("root-file.cue")
+        try Data("not a package".utf8).write(to: rootFile)
+        expectInvalid(rootFile, "regular file cannot substitute for a package root")
+        let manifestDirectory = try copyPackage(validationBase, named: "manifest-directory")
+        try fileManager.removeItem(at: manifestDirectory.appendingPathComponent("manifest.yaml"))
+        try fileManager.createDirectory(at: manifestDirectory.appendingPathComponent("manifest.yaml"), withIntermediateDirectories: false)
+        expectInvalid(manifestDirectory, "manifest directory cannot substitute for a regular file")
+        let sectionsFile = try copyPackage(validationBase, named: "sections-file")
+        try fileManager.removeItem(at: sectionsFile.appendingPathComponent("sections"))
+        try Data("not a directory".utf8).write(to: sectionsFile.appendingPathComponent("sections"))
+        expectInvalid(sectionsFile, "controlled directory rejects regular-file substitution")
+        let itemDirectory = try copyPackage(validationBase, named: "item-directory")
+        let itemDirectoryURL = try itemFile(in: itemDirectory, suffix: ".cue.md")
+        try fileManager.removeItem(at: itemDirectoryURL)
+        try fileManager.createDirectory(at: itemDirectoryURL, withIntermediateDirectories: false)
+        expectInvalid(itemDirectory, "item record rejects directory substitution")
+
+        let sectionDepth = try copyPackage(validationBase, named: "section-depth")
+        let nestedSectionURL = sectionDepth.appendingPathComponent("sections/nested/\(UUID().uuidString.lowercased()).yaml")
+        try fileManager.createDirectory(at: nestedSectionURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: nestedSectionURL)
+        expectInvalid(sectionDepth, "section inventory rejects unexpected depth")
+        let shallowItem = try copyPackage(validationBase, named: "shallow-item")
+        try Data("x".utf8).write(to: shallowItem.appendingPathComponent("items/\(UUID().uuidString.lowercased()).cue.md"))
+        expectInvalid(shallowItem, "item inventory rejects shallow paths")
+        let deepTombstone = try copyPackage(validationBase, named: "deep-tombstone")
+        let deepTombstoneURL = deepTombstone.appendingPathComponent("tombstones/nested/\(UUID().uuidString.lowercased()).json")
+        try fileManager.createDirectory(at: deepTombstoneURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: deepTombstoneURL)
+        expectInvalid(deepTombstone, "tombstone inventory rejects unexpected depth")
+        let wrongExtension = try copyPackage(validationBase, named: "wrong-extension")
+        try Data("{}".utf8).write(to: wrongExtension.appendingPathComponent("sections/\(UUID().uuidString.lowercased()).json"))
+        expectInvalid(wrongExtension, "section inventory rejects wrong extensions")
+        let unexpectedRoot = try copyPackage(validationBase, named: "unexpected-root")
+        try Data("x".utf8).write(to: unexpectedRoot.appendingPathComponent("other.txt"))
+        expectInvalid(unexpectedRoot, "package inventory rejects unexpected root entries")
+
+        let badYear = try copyPackage(validationBase, named: "bad-year")
+        let badYearItem = try itemFile(in: badYear, suffix: ".cue.md")
+        let nonASCIIYear = badYear.appendingPathComponent("items/２０２３/11", isDirectory: true)
+        try fileManager.createDirectory(at: nonASCIIYear, withIntermediateDirectories: true)
+        try fileManager.moveItem(at: badYearItem, to: nonASCIIYear.appendingPathComponent(badYearItem.lastPathComponent))
+        expectInvalid(badYear, "item inventory rejects non-ASCII UTC year digits")
+        let badMonth = try copyPackage(validationBase, named: "bad-month")
+        let badMonthItem = try itemFile(in: badMonth, suffix: ".cue.md")
+        let month13 = badMonth.appendingPathComponent("items/2023/13", isDirectory: true)
+        try fileManager.createDirectory(at: month13, withIntermediateDirectories: true)
+        try fileManager.moveItem(at: badMonthItem, to: month13.appendingPathComponent(badMonthItem.lastPathComponent))
+        expectInvalid(badMonth, "item inventory rejects out-of-range UTC month")
+        let bracedID = try copyPackage(validationBase, named: "braced-id")
+        let bracedItem = try itemFile(in: bracedID, suffix: ".cue.md")
+        try fileManager.moveItem(
+            at: bracedItem,
+            to: bracedItem.deletingLastPathComponent().appendingPathComponent("{\(source.items[0].id.uuidString.lowercased())}.cue.md")
+        )
+        expectInvalid(bracedID, "item inventory rejects noncanonical UUID filenames")
+
+        let unsafeLegacy = try copyPackage(schema2URL, named: "unsafe-legacy-path")
+        try rewriteManifest(at: unsafeLegacy) {
+            var items = $0["items"] as! [String]
+            items.append("../escape.md")
+            $0["items"] = items
+        }
+        expectInvalid(unsafeLegacy, "schema-2 manifest rejects escaping relative paths")
+        let duplicateLegacyPath = try copyPackage(schema2URL, named: "duplicate-legacy-path")
+        try rewriteManifest(at: duplicateLegacyPath) {
+            var items = $0["items"] as! [String]
+            items.append(items[0])
+            $0["items"] = items
+        }
+        expectInvalid(duplicateLegacyPath, "schema-2 manifest rejects duplicate membership paths")
+    } catch {
+        failed += 1
+        print("FAIL  package planning setup: \(error)")
+    }
+}
+
+private func tombstoneURLFor(_ package: URL, itemID: UUID) -> URL {
+    package.appendingPathComponent("tombstones/\(itemID.uuidString.lowercased()).json")
+}
+
 private func checkStorage() {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
     let url = directory.appendingPathComponent("workspace.cue", isDirectory: true)
@@ -603,6 +1230,7 @@ checkModifierTapDetector()
 checkSelectionModel()
 checkMarkdown()
 checkItemRecordCodec()
+checkPackagePlan()
 checkStorage()
 checkDuplicatePolicy()
 checkPanelPresentation()

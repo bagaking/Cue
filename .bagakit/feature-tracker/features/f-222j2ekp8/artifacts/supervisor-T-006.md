@@ -3,7 +3,9 @@
 ## Execution contract
 
 - owner: `f-222j2ekp8/T-006`
-- integration writer: `/root/t006_writer_recovery`; all other agents are read-only
+- integration writer: `/root/t006_writer_recovery`; the bounded B2
+  error-boundary writer handed the green tree back, and all other agents are
+  read-only
 - mutation root: current tree on `main`
 - protected baseline: Cue 0.2.0 schema-2 packages remain readable and are
   migrated only by a verified schema-3 write
@@ -39,16 +41,17 @@
 - HEAD/upstream at recovery-writer assignment: `e07cb07`, `main == origin/main`
 - worktree at recovery-writer assignment: B1 codec/tests and this supervisor
   packet were dirty, with an empty staged index
-- Tracker: T-006 remains `in_progress`; Slice B1 is not yet committed, and
-  T-006 commit plus finish evidence is not yet recorded
-- integration writer: `/root/t006_writer_recovery`; ownership transferred from
-  `/root/t006_writer` solely because transient provider authentication failures
-  prevented that agent from continuing; principle, transaction, migration,
-  codec, and final reviewers remain read-only
+- Tracker: T-006 remains `in_progress`; Slice B1 is pushed as `ef8dc9a`, while
+  T-006 gate, prepared-commit, and finish evidence are not yet recorded
+- integration writer: `/root/t006_writer_recovery`; its bounded
+  `/root/t006_writer_recovery/b2_collision_writer` child completed the B2
+  error-boundary correction and handed ownership back; principle, transaction,
+  migration, codec, and final reviewers remain read-only
 - active side effects at recovery: one process from
   `dist/Cue.app/Contents/MacOS/Cue` was already alive as PID 43717; the writer
   did not start, package, relaunch, or reset permissions
-- implementation: Slice A is pushed as `e07cb07`; Slice B1 adds the public
+- implementation: Slice A is pushed as `e07cb07`; Slice B1 is pushed as
+  `ef8dc9a` and adds the public
   lossless `CueItemRecordCodec` without activating schema 3 in
   `WorkspaceStore`, so live package behavior remains schema 2
 - passed evidence: Tracker validation and Goal fresh-executor check; prior
@@ -58,9 +61,16 @@
   exactly one winner for two coordinated writers using the same expected
   generation; Slice B1 warnings-as-errors, 119 Core checks, 66 AppKit
   integration checks, Tracker validation, and independent adversarial codec
-  review pass
-- not run: schema-3 inventory/migration planning, coordinated snapshot/CAS,
-  publication failpoints, package activation, and runtime qualification
+  review pass; current Slice B2 bytes pass warnings-as-errors; exactly one full
+  `sh scripts/check.sh` run passes 257 Core checks and 66 AppKit integration
+  checks after correcting a `/var` versus `/private/var` fixture-path alias and
+  preserving real filesystem read errors outside decoder normalization; both
+  independent final B2 code reviews and Feature Tracker validation pass; the
+  final staged blob/message/allowlist review passed its code and message
+  portions and blocked only on the stale owner-evidence wording corrected here
+- B2 is pending only commit and push. Coordinated snapshot/CAS, publication
+  failpoints, live package activation, and runtime qualification remain
+  unimplemented Slice C work.
 
 ## Architecture handoff
 
@@ -82,6 +92,23 @@
   preserves the record and tombstone as a typed conflict
 - schema 2 opens without mutation; its first verified write stages schema 3;
   legacy aggregate Markdown remains a separate internal migration path
+- Slice B2's unknown schema-2 metadata guarantee is scoped to item/source
+  metadata carried into the shared schema-3 `cue` map. Unknown legacy
+  manifest metadata blocks migration because the schema-3 manifest has exactly
+  four keys; B2 does not invent a side channel or expand a section-metadata
+  promise.
+- The membership-free schema-3 manifest keeps the project-native keys
+  `cue_schema`, `cue_workspace_id`, `title`, and `required_features` exactly;
+  generic `schema`/`id` spellings are not a reviewed contract change.
+- Slice B2 consumes a package URL supplied inside a future coordinated
+  accessor, reads it exactly once into a raw inspection, and builds migration
+  plans purely from that inspection. Coordination, CAS, staging, and
+  publication remain Slice C owners.
+- T-006 `tasks.json` source refs name the pre-extraction `Sources/Cue/` paths as
+  immutable reviewed historical inputs while the task is active. The current
+  owners are `Sources/CueCore/WorkspacePackageCodec.swift` and
+  `Sources/CueCore/WorkspaceStore.swift`; only a reviewed later plan
+  supersession may correct the canonical task refs.
 
 ## Locked design gates
 
@@ -122,10 +149,10 @@
 2. The minimal UI-framework-free `CueCore` extraction is pushed as `e07cb07`;
    legacy aggregate Markdown and derived search cache remain app-side, and the
    executable plus checks consume the sole Core package writer.
-3. Slice B1 lands the public lossless record codec as one rollback boundary;
-   next land schema-3 inventory/tombstone/migration planning as Slice B2, then
-   coordinated transaction and snapshot-based AppModel recovery/Undo in
-   separate behavior closures.
+3. Slice B1 is pushed as `ef8dc9a`; Slice B2 is staged with warnings, its exact
+   one full gate, both final reviews, and Tracker validation passing. Commit
+   and push B2, then land Slice C's coordinated transaction and snapshot-based
+   AppModel recovery/Undo as separate behavior closures.
 4. Keep transaction, migration/codec, privacy/runtime, and final adversarial
    reviewers read-only; correct root causes before each commit.
 5. Do not start T-007 attachments until Tracker has recorded T-006 gate,
