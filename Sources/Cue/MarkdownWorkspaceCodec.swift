@@ -1,3 +1,4 @@
+import CueCore
 import Foundation
 
 enum MarkdownWorkspaceCodec {

@@ -1,23 +1,19 @@
 import CryptoKit
 import Foundation
 
-final class WorkspaceStore {
+public final class WorkspaceStore {
     private let fileManager: FileManager
     private let backupLimit: Int
-    private let cacheDirectoryURL: URL
 
-    init(
+    public init(
         fileManager: FileManager = .default,
-        backupLimit: Int = 10,
-        cacheDirectoryURL: URL? = nil
+        backupLimit: Int = 10
     ) {
         self.fileManager = fileManager
         self.backupLimit = max(backupLimit, 10)
-        self.cacheDirectoryURL = cacheDirectoryURL ?? fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Cue/WorkspaceIndex", isDirectory: true)
     }
 
-    func create(document: WorkspaceDocument, at url: URL) throws -> FileFingerprint {
+    public func create(document: WorkspaceDocument, at url: URL) throws -> FileFingerprint {
         try validatePackageURL(url)
         try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         guard !fileManager.fileExists(atPath: url.path) else {
@@ -33,7 +29,7 @@ final class WorkspaceStore {
         }
     }
 
-    func load(from url: URL) throws -> (WorkspaceDocument, FileFingerprint) {
+    public func load(from url: URL) throws -> (WorkspaceDocument, FileFingerprint) {
         try validatePackageURL(url)
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
@@ -95,7 +91,6 @@ final class WorkspaceStore {
             }
             document.normalizeOrder()
             let fingerprint = try fingerprint(for: url)
-            try? rebuildSearchIndex(for: document)
             return (document, fingerprint)
         } catch let error as WorkspaceStoreError {
             throw error
@@ -105,7 +100,7 @@ final class WorkspaceStore {
     }
 
     @discardableResult
-    func write(
+    public func write(
         document source: WorkspaceDocument,
         to url: URL,
         expectedFingerprint: FileFingerprint?
@@ -142,7 +137,6 @@ final class WorkspaceStore {
             guard sameWorkspaceContent(validated, canonicalDocument) else {
                 throw WorkspaceStoreError.invalidDocument("post-write package did not match the intended workspace")
             }
-            try? rebuildSearchIndex(for: validated)
             return fingerprint
         } catch {
             if let backupURL {
@@ -153,16 +147,7 @@ final class WorkspaceStore {
         }
     }
 
-    func importLegacyWorkspace(from sourceURL: URL, to packageURL: URL) throws -> FileFingerprint {
-        let data = try Data(contentsOf: sourceURL)
-        guard let markdown = String(data: data, encoding: .utf8) else {
-            throw WorkspaceStoreError.invalidDocument("legacy workspace is not UTF-8")
-        }
-        let document = try MarkdownWorkspaceCodec.decode(markdown)
-        return try create(document: document, at: packageURL)
-    }
-
-    func saveConflictCopy(document: WorkspaceDocument, nextTo url: URL) throws -> URL {
+    public func saveConflictCopy(document: WorkspaceDocument, nextTo url: URL) throws -> URL {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
@@ -178,7 +163,7 @@ final class WorkspaceStore {
         return copy
     }
 
-    func fingerprint(for url: URL) throws -> FileFingerprint {
+    public func fingerprint(for url: URL) throws -> FileFingerprint {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
             throw WorkspaceStoreError.missingFile
@@ -203,19 +188,6 @@ final class WorkspaceStore {
         }
         let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
         return FileFingerprint(size: totalSize, modifiedAt: modifiedAt, digest: digest)
-    }
-
-    func searchIndexURL(for workspaceID: UUID) -> URL {
-        cacheDirectoryURL.appendingPathComponent("\(workspaceID.uuidString.lowercased()).json")
-    }
-
-    func rebuildSearchIndex(for document: WorkspaceDocument) throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let data = try encoder.encode(WorkspaceSearchIndex.rebuild(from: document))
-        try fileManager.createDirectory(at: cacheDirectoryURL, withIntermediateDirectories: true)
-        try atomicWrite(data, to: searchIndexURL(for: document.id))
     }
 
     private func encodedFiles(

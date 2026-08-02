@@ -41,11 +41,12 @@ CueMain
 │   ├── secure/denylist checks         fail-closed before selected-text reads
 │   └── CaptureHUD                    explicit result receipt
 ├── CapturePolicy                     normalized duplicate suppression
-└── WorkspaceStore                   workspace load/write/conflict/recovery owner
-    ├── WorkspacePackageCodec        `.cue` package records
-    ├── MarkdownWorkspaceCodec       legacy aggregate Markdown for recovery,
-    │                                merge, and internal migration
-    └── WorkspaceSearchIndex         rebuildable derived search data
+├── WorkspaceLegacyImporter          app-side legacy aggregate adapter
+│   └── MarkdownWorkspaceCodec       recovery, merge, and explicit migration
+├── WorkspaceSearchIndexStore        rebuildable app-side derived search data
+└── CueCore                          UI-framework-free persistence module
+    └── WorkspaceStore               sole package load/write/conflict owner
+        └── WorkspacePackageCodec    current schema-2 `.cue` package records
 ```
 
 Ownership rules:
@@ -56,9 +57,15 @@ Ownership rules:
   `CuePanel` frame and presentation. `PanelPresentationMachine` and
   `PanelGeometryPolicy` keep its transition and geometry contracts testable
   without a second overlay window.
-- `WorkspaceStore` and its codecs own persistence. Settings, caches, views,
-  future CLI code, and future mobile code must not implement another record
-  writer.
+- `CueCore.WorkspaceStore` and its package codec own mutable package
+  persistence. Settings, caches, views, legacy aggregate adapters, future CLI
+  code, and future mobile code must not implement another record writer.
+- `WorkspaceSearchIndexStore` writes only rebuildable cache data. `AppModel`
+  asks it to rebuild after successful active-workspace loads and commits, and a
+  cache failure cannot invalidate package content.
+- `MarkdownWorkspaceCodec` remains an app-side legacy aggregate
+  recovery/merge/import adapter. `WorkspaceLegacyImporter` may decode it, but
+  package creation still goes through `CueCore.WorkspaceStore`.
 - `SelectionCaptureService` is invoked only by an explicit user command.
   Clipboard history, passive screen capture, arbitrary-app Send, and silent
   clipboard fallback remain outside the product boundary.
@@ -106,7 +113,7 @@ explicit command
   -> selection/composer input
   -> CapturePolicy when external content is involved
   -> AppModel mutation
-  -> WorkspaceStore expected-state check and write
+  -> CueCore.WorkspaceStore expected-state check and write
   -> visible success, duplicate, permission, privacy, or recovery receipt
 ```
 
@@ -131,7 +138,8 @@ frame and any pending rail placement from the same screen snapshot.
 
 ## Proof ownership
 
-- `Checks/CueCoreChecks/main.swift`: pure policy, codec, storage, selection, and
+- `Checks/CueCoreChecks/main.swift`: imports `CueCore` as a public consumer and
+  covers policy, codec, storage, legacy adapter, derived cache, selection, and
   geometry contracts.
 - `Sources/Cue/IntegrationCheckRunner.swift`: `AppModel` plus real AppKit owner
   paths, including retained `NSPanel` behavior.

@@ -44,13 +44,15 @@
 - active side effects at recovery: one process from
   `dist/Cue.app/Contents/MacOS/Cue` was already alive as PID 43717; the writer
   did not start, package, relaunch, or reset permissions
-- implementation: not started
+- implementation: Slice A extraction is complete in the worktree and awaiting
+  commit; schema behavior remains version 2
 - passed evidence: Tracker validation and Goal fresh-executor check; prior
   0.2.0 baseline passed 92 Core and 63 AppKit checks before T-006 started;
   Researcher pass 002's standalone macOS process probe observed pre-publish
   live-old plus staged-new, post-publish live-new plus retained backup-old, and
   exactly one winner for two coordinated writers using the same expected
-  generation
+  generation; Slice A warnings-as-errors build and 91 Core plus 66 AppKit
+  integration checks pass
 - not run: every T-006-specific codec, migration, concurrency, failpoint,
   package, and runtime gate
 
@@ -110,10 +112,11 @@
 
 ## Next owner action
 
-1. Review and commit the truth-alignment slice containing Researcher pass 002,
-   claim-layer corrections, this locked design, and the `b3fa432` baseline.
-2. Extract the minimal UI-framework-free `CueCore` without behavior change and
-   prove the executable still consumes one storage owner.
+1. The truth-alignment slice is pushed as `9bdca1e` on `origin/main`.
+2. Review and commit the minimal UI-framework-free `CueCore` extraction under
+   `Sources/CueCore/`; legacy aggregate Markdown and derived search cache stay
+   under `Sources/Cue/`, and the executable plus checks consume the sole Core
+   package writer.
 3. Land the shared lossless record/schema codec, then the coordinated
    transaction, then snapshot-based AppModel recovery/Undo in separate
    rollback-sized behavior closures.

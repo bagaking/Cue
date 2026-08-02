@@ -1,3 +1,4 @@
+import CueCore
 import Foundation
 
 private var passed = 0
@@ -115,14 +116,22 @@ private func checkMarkdown() {
 private func checkStorage() {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
     let url = directory.appendingPathComponent("workspace.cue", isDirectory: true)
-    let store = WorkspaceStore(cacheDirectoryURL: directory.appendingPathComponent("Cache", isDirectory: true))
+    let store = WorkspaceStore()
     var document = sampleDocument()
 
     do {
         let fingerprint = try store.create(document: document, at: url)
         check(FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.yaml").path), "package writes a readable manifest")
-        check(FileManager.default.fileExists(atPath: url.appendingPathComponent(WorkspacePackageCodec.sectionPath(document.sections[0])).path), "package writes one section record per section")
-        let itemURL = url.appendingPathComponent(WorkspacePackageCodec.itemPath(document.items[0]))
+        let sectionURL = url.appendingPathComponent("sections/\(document.sections[0].id.uuidString.lowercased()).yaml")
+        check(FileManager.default.fileExists(atPath: sectionURL.path), "package writes one section record per section")
+        let itemURL = try FileManager.default.contentsOfDirectory(
+            at: url.appendingPathComponent("items", isDirectory: true),
+            includingPropertiesForKeys: nil
+        ).flatMap { year in
+            (try? FileManager.default.contentsOfDirectory(at: year, includingPropertiesForKeys: nil)) ?? []
+        }.flatMap { month in
+            (try? FileManager.default.contentsOfDirectory(at: month, includingPropertiesForKeys: nil)) ?? []
+        }.first { $0.lastPathComponent == "\(document.items[0].id.uuidString.lowercased()).md" }!
         check(FileManager.default.fileExists(atPath: itemURL.path), "package writes one Markdown document per item")
         check(FileManager.default.fileExists(atPath: url.appendingPathComponent("assets/sha256").path), "package reserves content-addressed assets")
         let readableItem = try String(contentsOf: itemURL, encoding: .utf8)
@@ -153,16 +162,22 @@ private func checkStorage() {
 
     let backupDirectory = FileManager.default.temporaryDirectory.appendingPathComponent("CueCoreChecks-\(UUID())", isDirectory: true)
     let backupURL = backupDirectory.appendingPathComponent("workspace.cue", isDirectory: true)
-    let backupStore = WorkspaceStore(cacheDirectoryURL: backupDirectory.appendingPathComponent("Cache", isDirectory: true))
+    let backupStore = WorkspaceStore()
+    let searchIndexStore = WorkspaceSearchIndexStore(directoryURL: backupDirectory.appendingPathComponent("Cache", isDirectory: true))
     do {
         var backupDocument = sampleDocument()
         let removedID = backupDocument.items[0].id
-        let removedItemPath = WorkspacePackageCodec.itemPath(backupDocument.items[0])
         let initial = try backupStore.create(document: backupDocument, at: backupURL)
-        check(FileManager.default.fileExists(atPath: backupStore.searchIndexURL(for: backupDocument.id).path), "write rebuilds a local search cache")
-        try FileManager.default.removeItem(at: backupStore.searchIndexURL(for: backupDocument.id))
-        try backupStore.rebuildSearchIndex(for: backupDocument)
-        check(FileManager.default.fileExists(atPath: backupStore.searchIndexURL(for: backupDocument.id).path), "search cache is rebuildable from package truth")
+        let removedItemURL = try FileManager.default.contentsOfDirectory(
+            at: backupURL.appendingPathComponent("items", isDirectory: true),
+            includingPropertiesForKeys: nil
+        ).flatMap { year in
+            (try? FileManager.default.contentsOfDirectory(at: year, includingPropertiesForKeys: nil)) ?? []
+        }.flatMap { month in
+            (try? FileManager.default.contentsOfDirectory(at: month, includingPropertiesForKeys: nil)) ?? []
+        }.first { $0.lastPathComponent == "\(removedID.uuidString.lowercased()).md" }!
+        try searchIndexStore.rebuild(for: backupDocument)
+        check(FileManager.default.fileExists(atPath: searchIndexStore.url(for: backupDocument.id).path), "search cache is rebuildable from package truth")
 
         backupDocument.items.append(WorkItem(body: "Next prompt", kind: .prompt, sectionID: backupDocument.inbox.id, contentHash: ContentHasher.hash("Next prompt"), order: 1))
         let secondFingerprint = try backupStore.write(document: backupDocument, to: backupURL, expectedFingerprint: initial)
@@ -172,8 +187,9 @@ private func checkStorage() {
 
         backupDocument.items.removeAll { $0.id == removedID }
         _ = try backupStore.write(document: backupDocument, to: backupURL, expectedFingerprint: secondFingerprint)
-        check(FileManager.default.fileExists(atPath: backupURL.appendingPathComponent(WorkspacePackageCodec.tombstonePath(for: removedID)).path), "physical item deletion writes a tombstone")
-        check(!FileManager.default.fileExists(atPath: backupURL.appendingPathComponent(removedItemPath).path), "deleted item document leaves the active item tree")
+        let tombstoneURL = backupURL.appendingPathComponent("tombstones/\(removedID.uuidString.lowercased()).json")
+        check(FileManager.default.fileExists(atPath: tombstoneURL.path), "physical item deletion writes a tombstone")
+        check(!FileManager.default.fileExists(atPath: removedItemURL.path), "deleted item document leaves the active item tree")
 
         let legacyURL = backupDirectory.appendingPathComponent("Legacy Workspace.md")
         try Data(MarkdownWorkspaceCodec.encode(sampleDocument()).utf8).write(to: legacyURL)
@@ -184,7 +200,7 @@ private func checkStorage() {
             check(true, "legacy single-file workspaces stay outside the runtime path")
         }
         let importedURL = backupDirectory.appendingPathComponent("Imported Workspace.cue", isDirectory: true)
-        _ = try backupStore.importLegacyWorkspace(from: legacyURL, to: importedURL)
+        _ = try WorkspaceLegacyImporter(workspaceStore: backupStore).importWorkspace(from: legacyURL, to: importedURL)
         check(try backupStore.load(from: importedURL).0.items.count == 1, "one-time legacy importer rescues data into a package")
     } catch {
         failed += 1

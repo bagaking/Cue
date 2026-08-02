@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import CueCore
 import Foundation
 
 /// Explicit Accessibility-only selection capture adapted from Pewter's

@@ -1,4 +1,5 @@
 import AppKit
+import CueCore
 import Foundation
 
 @MainActor
@@ -31,16 +32,39 @@ enum IntegrationCheckRunner {
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CueIntegration-\(UUID())", isDirectory: true)
         let settingsStore = SettingsStore(directoryURL: root.appendingPathComponent("Settings", isDirectory: true))
-        let workspaceStore = WorkspaceStore(cacheDirectoryURL: root.appendingPathComponent("Cache", isDirectory: true))
-        let externalStore = WorkspaceStore(cacheDirectoryURL: root.appendingPathComponent("ExternalCache", isDirectory: true))
-        let model = AppModel(settingsStore: settingsStore, workspaceStore: workspaceStore)
+        let workspaceStore = WorkspaceStore()
+        let externalStore = WorkspaceStore()
+        let searchIndexStore = WorkspaceSearchIndexStore(directoryURL: root.appendingPathComponent("Cache", isDirectory: true))
+        let model = AppModel(
+            settingsStore: settingsStore,
+            workspaceStore: workspaceStore,
+            searchIndexStore: searchIndexStore
+        )
         let firstURL = root.appendingPathComponent("Alpha.cue", isDirectory: true)
         model.createWorkspace(title: "Alpha", at: firstURL)
         check(model.hasWorkspace && model.activeWorkspaceTitle == "Alpha", "workspace creation becomes active")
+        check(FileManager.default.fileExists(atPath: searchIndexStore.url(for: model.document!.id).path), "AppModel rebuilds derived search cache after workspace creation")
+
+        let blockedCacheURL = root.appendingPathComponent("BlockedCache")
+        try? Data("not a directory".utf8).write(to: blockedCacheURL)
+        let cacheFailureModel = AppModel(
+            settingsStore: SettingsStore(directoryURL: root.appendingPathComponent("CacheFailureSettings", isDirectory: true)),
+            workspaceStore: WorkspaceStore(),
+            searchIndexStore: WorkspaceSearchIndexStore(directoryURL: blockedCacheURL)
+        )
+        let cacheFailureWorkspaceURL = root.appendingPathComponent("Cache Failure.cue", isDirectory: true)
+        cacheFailureModel.createWorkspace(title: "Cache Failure", at: cacheFailureWorkspaceURL)
+        check(
+            cacheFailureModel.hasWorkspace && (try? workspaceStore.load(from: cacheFailureWorkspaceURL).0.title) == "Cache Failure",
+            "derived search cache failure never invalidates committed package content"
+        )
 
         let first = model.addItem(body: "First future prompt", kind: .prompt)
         let second = model.addItem(body: "Second future prompt", kind: .prompt)
         check(model.queuedCount == 2, "typed prompts share one queued lifecycle")
+        try? FileManager.default.removeItem(at: searchIndexStore.url(for: model.document!.id))
+        _ = model.addItem(body: "Cache rebuild prompt", kind: .prompt)
+        check(FileManager.default.fileExists(atPath: searchIndexStore.url(for: model.document!.id).path), "AppModel rebuilds derived search cache after a successful commit")
         check({ if case .captured = first { return true }; return false }(), "first prompt is captured")
         let exactWhitespace = "  indented code\n  stays indented\n"
         let exactCapture = model.addItem(body: exactWhitespace, kind: .selection)

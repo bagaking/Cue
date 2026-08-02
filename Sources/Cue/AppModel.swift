@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CueCore
 import Foundation
 
 @MainActor
@@ -39,6 +40,7 @@ final class AppModel: ObservableObject {
 
     private let settingsStore: SettingsStore
     private let workspaceStore: WorkspaceStore
+    private let searchIndexStore: WorkspaceSearchIndexStore
     private var expectedFingerprint: FileFingerprint?
     private var recoveryDocument: WorkspaceDocument?
     private var undoStack: [WorkspaceDocument] = []
@@ -54,10 +56,12 @@ final class AppModel: ObservableObject {
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
-        workspaceStore: WorkspaceStore = WorkspaceStore()
+        workspaceStore: WorkspaceStore = WorkspaceStore(),
+        searchIndexStore: WorkspaceSearchIndexStore = WorkspaceSearchIndexStore()
     ) {
         self.settingsStore = settingsStore
         self.workspaceStore = workspaceStore
+        self.searchIndexStore = searchIndexStore
         settings = settingsStore.load()
         isAccessibilityTrusted = SelectionCaptureService.isTrusted(prompt: false)
 
@@ -166,6 +170,7 @@ final class AppModel: ObservableObject {
             settings.activeWorkspaceID = descriptor.id
             try settingsStore.save(settings)
             self.document = document
+            rebuildSearchIndex(for: document)
             expectedFingerprint = fingerprint
             recoveryDocument = nil
             recoveryMarkdown = nil
@@ -193,6 +198,7 @@ final class AppModel: ObservableObject {
             settings.activeWorkspaceID = descriptor.id
             try settingsStore.save(settings)
             document = loaded
+            rebuildSearchIndex(for: loaded)
             expectedFingerprint = fingerprint
             recoveryDocument = nil
             recoveryMarkdown = nil
@@ -223,6 +229,7 @@ final class AppModel: ObservableObject {
             try settingsStore.save(updatedSettings)
             settings = updatedSettings
             document = loaded
+            rebuildSearchIndex(for: loaded)
             expectedFingerprint = fingerprint
             recoveryDocument = nil
             recoveryMarkdown = nil
@@ -771,6 +778,7 @@ final class AppModel: ObservableObject {
             )
             expectedFingerprint = fingerprint
             document = request.mergedDocument
+            rebuildSearchIndex(for: request.mergedDocument)
             undoStack.append(request.externalDocument)
             if undoStack.count > 30 { undoStack.removeFirst(undoStack.count - 30) }
             recoveryMarkdown = nil
@@ -846,6 +854,7 @@ final class AppModel: ObservableObject {
                 throw WorkspaceStoreError.invalidDocument("workspace identifier no longer matches this reference")
             }
             document = loaded
+            rebuildSearchIndex(for: loaded)
             expectedFingerprint = fingerprint
             activeSectionID = loaded.sections.contains(where: { $0.id == activeSectionID }) ? activeSectionID : loaded.inbox.id
             storageHealth = .ready(lastWrite: nil)
@@ -895,6 +904,7 @@ final class AppModel: ObservableObject {
             )
             expectedFingerprint = fingerprint
             self.document = document
+            rebuildSearchIndex(for: document)
             storageHealth = .ready(lastWrite: Date())
             recoveryMarkdown = nil
             recoveryDocument = nil
@@ -936,6 +946,10 @@ final class AppModel: ObservableObject {
         filePollTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkExternalFileState() }
         }
+    }
+
+    private func rebuildSearchIndex(for document: WorkspaceDocument) {
+        try? searchIndexStore.rebuild(for: document)
     }
 
     private func scheduleCompletionDwell(for id: UUID) {

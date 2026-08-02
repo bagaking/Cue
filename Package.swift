@@ -8,8 +8,16 @@ let package = Package(
         .executable(name: "Cue", targets: ["Cue"]),
     ],
     targets: [
+        .target(
+            name: "CueCore",
+            path: "Sources/CueCore",
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+            ]
+        ),
         .executableTarget(
             name: "Cue",
+            dependencies: ["CueCore"],
             path: "Sources/Cue",
             swiftSettings: [
                 .swiftLanguageMode(.v5),
