@@ -9,10 +9,12 @@ enum PanelEdge: String, Equatable, Sendable {
 enum PanelRevealReason: Equatable, Sendable {
     case explicit
     case hover
+    case railClick
     case pin
 
-    var allowsFocus: Bool { self == .explicit }
+    var allowsFocus: Bool { self == .explicit || self == .railClick }
     var usesTemporaryFloatingLevel: Bool { self == .hover }
+    var usesRailAnchor: Bool { self == .hover || self == .railClick }
 }
 
 enum PanelPresentationState: Equatable, Sendable {

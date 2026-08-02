@@ -270,7 +270,25 @@ enum IntegrationCheckRunner {
             check(abs(actualRail.width - expectedRail.width) < 0.5 && abs(actualRail.height - expectedRail.height) < 0.5, "actual retained-Sidecar NSPanel accepts the 22 by 88 rail frame")
             check(abs(actualRail.minX - expectedRail.minX) < 0.5 && abs(actualRail.minY - expectedRail.minY) < 0.5, "actual NSPanel lands on the derived screen-edge target")
             check(panelProbe.integrationPanelMinSize.width <= expectedRail.width && panelProbe.integrationContentMinSize.width <= expectedRail.width, "retracted NSPanel constraints no longer retain expanded minimum geometry")
-            probePointer = NSPoint(x: actualRail.midX, y: actualRail.midY)
+
+            let canonicalBeforeRailClick = panelProbe.integrationExpandedFrame
+            panelProbe.runIntegrationRailClick()
+            runLoop(for: 0.35)
+            let actualRailClick = panelProbe.integrationPanelFrame
+            check(panelProbe.integrationPresentationState == .expanded, "clicking the rail explicitly expands the actual NSPanel")
+            check(panelProbe.integrationLastRevealReason == .railClick, "rail click retains distinct explicit reveal semantics")
+            check(panelProbe.integrationExpandedFrame == canonicalBeforeRailClick, "rail click never mutates canonical expanded geometry")
+            check(actualRailClick.intersects(actualRail), "rail click expansion remains connected to its originating rail")
+            if actualRail.midX > actualRailClick.midX {
+                check(abs(actualRailClick.maxX - actualRail.maxX) < 0.5, "right rail click keeps the expanded panel on the clicked outer edge")
+            } else {
+                check(abs(actualRailClick.minX - actualRail.minX) < 0.5, "left rail click keeps the expanded panel on the clicked outer edge")
+            }
+
+            runLoop(for: 1.0)
+            let railAfterClick = panelProbe.integrationPanelFrame
+            check(isRetracted(panelProbe.integrationPresentationState), "rail-click reveal returns to the same compact lifecycle after disengagement")
+            probePointer = NSPoint(x: railAfterClick.midX, y: railAfterClick.midY)
             panelProbe.runIntegrationPointerEntered(timestamp: ProcessInfo.processInfo.systemUptime + 0.001)
             let revealDeadline = Date().addingTimeInterval(1.1)
             while Date() < revealDeadline {
@@ -278,11 +296,11 @@ enum IntegrationCheckRunner {
             }
             let actualHover = panelProbe.integrationPanelFrame
             check(panelProbe.integrationPresentationState == .expanded, "validated rail hover reveals exactly one stable expanded preview")
-            check(actualHover.intersects(actualRail), "actual hover preview preserves a continuous rail-to-content pointer path")
-            if actualRail.midX > actualHover.midX {
-                check(abs(actualHover.maxX - actualRail.maxX) < 0.5, "actual right-edge hover preview closes the outer strip gap")
+            check(actualHover.intersects(railAfterClick), "actual hover preview preserves a continuous rail-to-content pointer path")
+            if railAfterClick.midX > actualHover.midX {
+                check(abs(actualHover.maxX - railAfterClick.maxX) < 0.5, "actual right-edge hover preview closes the outer strip gap")
             } else {
-                check(abs(actualHover.minX - actualRail.minX) < 0.5, "actual left-edge hover preview closes the outer strip gap")
+                check(abs(actualHover.minX - railAfterClick.minX) < 0.5, "actual left-edge hover preview closes the outer strip gap")
             }
         } else {
             check(false, "actual NSPanel owner derives a rail target")

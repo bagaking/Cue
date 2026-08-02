@@ -304,17 +304,25 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     private func handleExplicitMouseInteraction() {
         switch machine.state {
-        case .hidden, .retracted:
+        case .hidden:
             show()
+        case .retracted:
+            revealFromRailClick()
         case .expanded where lastRevealReason == .hover:
             // Promote a hover preview before AppKit dispatches the click. This
-            // restores the configured level/key intent without restarting an
-            // already explicit panel on every ordinary mouse-down.
-            show()
+            // restores configured level/key intent without moving away from
+            // the rail that the user explicitly clicked.
+            revealFromRailClick()
             panel.makeKey()
         case .expanded:
             break
         }
+    }
+
+    private func revealFromRailClick() {
+        invalidateComposerFocusRequest()
+        focusComposerAfterReveal = false
+        _ = process(.show(reason: .railClick))
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -395,7 +403,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         let token = machine.generation
         lastRevealReason = reason
         let railPlacement = pendingRailPlacement
-        let targetFrame = reason == .hover
+        let targetFrame = reason.usesRailAnchor
             ? railPlacement.map {
                 PanelGeometryPolicy.hoverExpandedFrame(
                     canonicalExpandedFrame: expandedFrame,
@@ -403,7 +411,9 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
                 )
             } ?? expandedFrame
             : expandedFrame
-        pendingRailPlacement = nil
+        // Hover keeps the originating rail available so a click can promote
+        // that preview to an explicit, focused reveal without changing frame.
+        if reason != .hover { pendingRailPlacement = nil }
         preparePanelForTransition()
         panel.isRetracted = false
         panel.level = reason.usesTemporaryFloatingLevel ? .floating : (configuredFloating ? .floating : .normal)
@@ -810,7 +820,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         switch machine.state {
         case .expanded:
             let token = machine.generation
-            let target = lastRevealReason == .hover
+            let target = lastRevealReason.usesRailAnchor
                 ? PanelGeometryPolicy.railPlacement(for: repaired, screens: screenGeometries).map {
                     PanelGeometryPolicy.hoverExpandedFrame(canonicalExpandedFrame: repaired, railPlacement: $0)
                 } ?? repaired
@@ -941,6 +951,10 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         acceptTrackingEvent(.entered, timestamp: timestamp)
     }
 
+    func runIntegrationRailClick() {
+        handleExplicitMouseInteraction()
+    }
+
     /// Seeds a prior interaction epoch so the public toggle path can prove
     /// that hidden presentation never leaks transient engagement into reveal.
     func runIntegrationSeedTransientEngagement() {
@@ -951,6 +965,8 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     var integrationPresentationState: PanelPresentationState { machine.state }
     var integrationPresentationGeneration: Int { machine.generation }
+    var integrationLastRevealReason: PanelRevealReason { lastRevealReason }
+    var integrationExpandedFrame: NSRect { expandedFrame }
     var integrationPanelFrame: NSRect { panel.frame }
     var integrationPanelMinSize: NSSize { panel.minSize }
     var integrationContentMinSize: NSSize { panel.contentMinSize }

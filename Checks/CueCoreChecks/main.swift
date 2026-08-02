@@ -248,7 +248,10 @@ private func checkPanelPresentation() {
     let hoverReveal = machine.handle(.hoverRevealDeadline(token: hoverToken))
     check(machine.state == .expanded && hoverReveal.contains(.presentExpanded(reason: .hover)), "bounded rail hover reveals the panel")
     check(!PanelRevealReason.hover.allowsFocus, "hover reveal cannot request focus")
-    check(PanelRevealReason.hover.usesTemporaryFloatingLevel && !PanelRevealReason.pin.usesTemporaryFloatingLevel, "only hover preview receives a temporary reachability level")
+    check(PanelRevealReason.hover.usesTemporaryFloatingLevel && !PanelRevealReason.railClick.usesTemporaryFloatingLevel, "only hover preview receives a temporary reachability level")
+    check(PanelRevealReason.hover.usesRailAnchor, "hover preview remains anchored to its originating rail")
+    check(PanelRevealReason.railClick.allowsFocus && PanelRevealReason.railClick.usesRailAnchor, "rail click is focus-capable without abandoning its originating edge")
+    check(PanelRevealReason.explicit.allowsFocus && !PanelRevealReason.explicit.usesRailAnchor, "global explicit reveal restores canonical expanded geometry")
 
     let pinExit = machine.handle(.hoverExited)
     let pinDeadline = effectToken(pinExit) { effect in
