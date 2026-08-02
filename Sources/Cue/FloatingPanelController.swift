@@ -7,6 +7,10 @@ private func currentAppKitPointerLocation() -> NSPoint? {
     return NSPoint(x: quartzPoint.x, y: primaryScreen.frame.maxY - quartzPoint.y)
 }
 
+private func currentAppKitMouseButtonDown() -> Bool {
+    NSEvent.pressedMouseButtons != 0
+}
+
 extension Notification.Name {
     static let cueModalInteractionEnded = Notification.Name("CueModalInteractionEnded")
 }
@@ -136,6 +140,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private var composerFocusGeneration = 0
     private let panelTraceEnabled = ProcessInfo.processInfo.environment["CUE_PANEL_TRACE"] == "1"
     private let pointerLocationProvider: () -> NSPoint?
+    private let mouseButtonStateProvider: () -> Bool
     private var trackingEventFence: TimeInterval = 0
     private var frameSettlePointerLocation: NSPoint?
     private var requiresPhysicalMotionAfterFrameSettle = false
@@ -143,9 +148,11 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     init(
         model: AppModel,
-        pointerLocationProvider: @escaping () -> NSPoint? = currentAppKitPointerLocation
+        pointerLocationProvider: @escaping () -> NSPoint? = currentAppKitPointerLocation,
+        mouseButtonStateProvider: @escaping () -> Bool = currentAppKitMouseButtonDown
     ) {
         self.pointerLocationProvider = pointerLocationProvider
+        self.mouseButtonStateProvider = mouseButtonStateProvider
         panel = CuePanel(
             contentRect: NSRect(origin: .zero, size: Self.initialSize),
             styleMask: [.nonactivatingPanel, .titled, .fullSizeContentView, .resizable, .closable],
@@ -264,11 +271,6 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     func hide() {
-        invalidateComposerFocusRequest()
-        focusComposerAfterReveal = false
-        mouseButtonDown = false
-        isMenuTracking = false
-        clearTextEditingHold()
         _ = process(.hide)
     }
 
@@ -295,8 +297,8 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             // interrupted frame animation so its stale completion cannot leave
             // transition size constraints or isAnimating latched.
             presentExpanded(reason: hoverNeedsLevelNormalization ? .pin : lastRevealReason)
-        } else if !pinned, !isAnimating {
-            rearmFromTrackedPointerState()
+        } else if !pinned {
+            reconcileAfterTerminalEvent()
         }
     }
 
@@ -323,13 +325,13 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     func windowDidBecomeKey(_ notification: Notification) {
         cancelPendingWork()
         guard !focusComposerAfterReveal else { return }
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent()
     }
 
     func windowDidResignKey(_ notification: Notification) {
         invalidateComposerFocusRequest()
         clearTextEditingHold()
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent(releaseMouseButton: true)
     }
 
     func windowWillMove(_ notification: Notification) {
@@ -338,6 +340,12 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         saveExpandedFrameIfUserDriven()
+        guard machine.state == .expanded, !isAnimating,
+              mouseButtonDown, !mouseButtonStateProvider() else { return }
+        // AppKit window dragging may consume the matching content mouse-up.
+        // A did-move sample with no pressed button is the event-owned terminal
+        // for that drag, not a poll or retry loop.
+        reconcileAfterTerminalEvent(releaseMouseButton: true)
     }
 
     func windowWillStartLiveResize(_ notification: Notification) {
@@ -346,13 +354,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     func windowDidEndLiveResize(_ notification: Notification) {
         saveExpandedFrameIfUserDriven()
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent(releaseMouseButton: true)
     }
 
     @discardableResult
     private func process(_ event: PanelPresentationEvent) -> [PanelPresentationEffect] {
         trace("event=\(String(describing: event)) before=\(String(describing: machine.state)) frame=\(NSStringFromRect(panel.frame))")
         let effects = machine.handle(event)
+        if machine.state == .hidden { clearTransientEngagementForHiddenState() }
         // A rail hides immediately rather than briefly exposing the retained
         // 352pt Sidecar subtree inside a 22pt window during a fade-out.
         if machine.state != .hidden || !panel.isRetracted { chrome.state = machine.state }
@@ -626,7 +635,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
                captureTextEditingHoldFromResponder(matching: editableTextTarget) {
                 return
             }
-            rearmFromTrackedPointerState()
+            reconcileAfterTerminalEvent()
         }
     }
 
@@ -691,13 +700,9 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private func settlePointerAfterProgrammaticFrame() {
         trackingEventFence = ProcessInfo.processInfo.systemUptime
         requiresPhysicalMotionAfterFrameSettle = true
-        let point = pointerLocationProvider()
+        let point = sampleCurrentPointerState()
         let transitionBaseline = frameTransitionPointerBaseline
         frameTransitionPointerBaseline = nil
-        if let point {
-            frameSettlePointerLocation = point
-            pointerInside = panel.frame.contains(point)
-        }
         let shouldReplayRailEntry = transitionBaseline?.animationToken == animationGeneration &&
             PanelTrackingPolicy.shouldReplayRailEntry(
                 transitionStartPointer: transitionBaseline?.location,
@@ -709,6 +714,27 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
             _ = process(.hoverEntered)
             return
         }
+        rearmFromTrackedPointerState()
+    }
+
+    @discardableResult
+    private func sampleCurrentPointerState() -> NSPoint? {
+        let point = pointerLocationProvider()
+        if let point {
+            frameSettlePointerLocation = point
+            pointerInside = panel.frame.contains(point)
+        }
+        return point
+    }
+
+    /// Existing interaction terminal owners call this once to release the
+    /// fact they own, sample current pointer truth and arm the single existing
+    /// generation-token deadline. It never polls and never retries a blocked
+    /// deadline.
+    private func reconcileAfterTerminalEvent(releaseMouseButton: Bool = false) {
+        if releaseMouseButton { mouseButtonDown = false }
+        guard !isAnimating else { return }
+        _ = sampleCurrentPointerState()
         rearmFromTrackedPointerState()
     }
 
@@ -816,10 +842,8 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     }
 
     @objc private func interactionEnded(_ notification: Notification) {
-        mouseButtonDown = false
         if notification.name == NSMenu.didEndTrackingNotification { isMenuTracking = false }
-        guard !isAnimating else { return }
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent(releaseMouseButton: true)
     }
 
     @objc private func textEditingBegan(_ notification: Notification) {
@@ -833,8 +857,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
         guard let editor = notification.object as? NSView,
               activeTextEditor === editor || editor.window === panel else { return }
         clearTextEditingHold()
-        guard !isAnimating else { return }
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent()
     }
 
     @objc private func frontmostApplicationChanged(_ notification: Notification) {
@@ -842,9 +865,7 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
               application.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
         invalidateComposerFocusRequest()
         clearTextEditingHold()
-        mouseButtonDown = false
-        guard !isAnimating else { return }
-        rearmFromTrackedPointerState()
+        reconcileAfterTerminalEvent(releaseMouseButton: true)
     }
 
     private func textInputActivity() {
@@ -875,6 +896,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
     private func clearTextEditingHold() {
         activeTextEditor = nil
         isTextEditing = false
+    }
+
+    private func clearTransientEngagementForHiddenState() {
+        invalidateComposerFocusRequest()
+        focusComposerAfterReveal = false
+        mouseButtonDown = false
+        isMenuTracking = false
+        clearTextEditingHold()
     }
 
     private func invalidateComposerFocusRequest() {
@@ -910,6 +939,14 @@ final class FloatingPanelController: NSObject, NSWindowDelegate {
 
     func runIntegrationPointerEntered(timestamp: TimeInterval) {
         acceptTrackingEvent(.entered, timestamp: timestamp)
+    }
+
+    /// Seeds a prior interaction epoch so the public toggle path can prove
+    /// that hidden presentation never leaks transient engagement into reveal.
+    func runIntegrationSeedTransientEngagement() {
+        mouseButtonDown = true
+        isMenuTracking = true
+        isTextEditing = true
     }
 
     var integrationPresentationState: PanelPresentationState { machine.state }

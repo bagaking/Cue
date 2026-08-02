@@ -1,0 +1,120 @@
+{
+  "version": 2,
+  "feat_id": "f-224j2prfr",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+    "AGENTS.md",
+    "Sources/Cue/FloatingPanelController.swift",
+    "Sources/Cue/PanelPresentation.swift",
+    "docs/EXPERIMENTS.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+        "AGENTS.md",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/PanelPresentation.swift",
+        "docs/EXPERIMENTS.md"
+      ],
+      "task_ids": [
+        "T-001",
+        "T-002"
+      ],
+      "superseded_task_ids": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Repair reliable idle edge retraction at the existing owner",
+      "objective": "Reproduce why the packaged unpinned panel remains obstructive, isolate the stale engagement or rearm contract, and make the smallest owner-native repair with deterministic public-behavior proof.",
+      "outcome": "Every idle expanded entry path yields to the compact edge target after bounded disengagement while active editing, drag, resize, menus, focus safety and explicit reveal remain intact.",
+      "acceptance": [
+        "The fix changes the existing FloatingPanelController/policy owner rather than adding another panel, global monitor, polling loop or dependency.",
+        "The exact reproducer fails before the repair and passes afterward through a deterministic reducer/policy or actual-panel integration seam.",
+        "Active typing and pointer/resize/menu engagement do not collapse mid-action, and terminal events reliably rearm without sticky holds or duplicate deadlines.",
+        "sh scripts/check.sh passes with warnings-as-errors, core, integration, Release render and package-contract checks."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The regression and full Cue behavior suite pass at the implementation boundary."
+        },
+        {
+          "kind": "artifact",
+          "ref": "Sources/Cue/IntegrationCheckRunner.swift",
+          "proves": "The retained AppKit panel honors the corrected retraction contract."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/PanelPresentation.swift",
+        "Sources/Cue/IntegrationCheckRunner.swift"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": "pass",
+      "last_gate_commands": [
+        {
+          "command": "sh scripts/check.sh",
+          "exit_code": 0,
+          "status": "pass"
+        }
+      ],
+      "last_commit_hash": null,
+      "notes": []
+    },
+    {
+      "id": "T-002",
+      "title": "Package, restart and qualify the exact edge build",
+      "objective": "Adversarially verify the repaired behavior on the real packaged window, record the exact build identity, restart Cue from dist, push the closed commits and close the tracker lifecycle.",
+      "outcome": "The running Cue process points to the signed committed package, retracts in the user's actual flow, remains reachable, and origin/main contains small reviewable commits with Tracker evidence.",
+      "acceptance": [
+        "The signed Release package passes Info.plist and executable identity checks and is launched from dist/Cue.app.",
+        "A real-window probe covers initial outside-pointer retraction, hover reveal, click/shortcut reveal, text edit then disengage, Panel Pin, drag/resize safety and compact-edge reachability.",
+        "The running process path and executable hash are recorded, the implementation commit is pushed to origin/main, and unresolved hardware-only coverage is named rather than implied."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The final packaged source tree remains fully green."
+        },
+        {
+          "kind": "manual",
+          "ref": "docs/EXPERIMENTS.md",
+          "proves": "The real AppKit window and packaged process satisfy the unobtrusive edge behavior."
+        },
+        {
+          "kind": "owner_receipt",
+          "ref": ".bagakit/feature-tracker/features/f-224j2prfr/owner-receipt.json",
+          "proves": "Feature task, gate and continuation truth are hash-bound."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-224j2prfr/proposal.md",
+        "AGENTS.md",
+        "scripts/check.sh",
+        "docs/EXPERIMENTS.md"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "todo",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "last_commit_hash": null,
+      "notes": []
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 @MainActor
@@ -14,6 +15,18 @@ enum IntegrationCheckRunner {
                 failed += 1
                 print("FAIL  \(name)")
             }
+        }
+
+        func runLoop(for duration: TimeInterval) {
+            let deadline = Date().addingTimeInterval(duration)
+            while Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            }
+        }
+
+        func isRetracted(_ state: PanelPresentationState) -> Bool {
+            if case .retracted = state { return true }
+            return false
         }
 
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("CueIntegration-\(UUID())", isDirectory: true)
@@ -199,6 +212,51 @@ enum IntegrationCheckRunner {
         ))
         check({ if case .storageFailure = unavailableMapping { return true }; return false }(), "unavailable mapped workspace blocks capture")
         check(model.settings.activeWorkspaceID == alphaID && model.document?.items.count == alphaCount, "failed mapping never contaminates the current workspace")
+
+        let outsidePointer = NSPoint(x: -10_000, y: -10_000)
+        let directShowProbe = FloatingPanelController(
+            model: model,
+            pointerLocationProvider: { outsidePointer },
+            mouseButtonStateProvider: { false }
+        )
+        directShowProbe.show()
+        runLoop(for: 1.4)
+        check(isRetracted(directShowProbe.integrationPresentationState), "public explicit show retracts when the pointer was already outside")
+        directShowProbe.hide()
+        runLoop(for: 0.2)
+
+        let poisonedToggleProbe = FloatingPanelController(
+            model: model,
+            pointerLocationProvider: { outsidePointer },
+            mouseButtonStateProvider: { false }
+        )
+        poisonedToggleProbe.show()
+        poisonedToggleProbe.runIntegrationSeedTransientEngagement()
+        poisonedToggleProbe.toggle()
+        runLoop(for: 0.24)
+        poisonedToggleProbe.toggle()
+        runLoop(for: 1.4)
+        check(isRetracted(poisonedToggleProbe.integrationPresentationState), "public toggle reveal cannot inherit editing, drag or menu holds from its hidden epoch")
+        poisonedToggleProbe.hide()
+        runLoop(for: 0.2)
+
+        var terminalPointer = NSPoint.zero
+        let terminalRearmProbe = FloatingPanelController(
+            model: model,
+            pointerLocationProvider: { terminalPointer },
+            mouseButtonStateProvider: { false }
+        )
+        let initialTerminalFrame = terminalRearmProbe.integrationPanelFrame
+        terminalPointer = NSPoint(x: initialTerminalFrame.midX, y: initialTerminalFrame.midY)
+        terminalRearmProbe.show()
+        runLoop(for: 0.4)
+        check(terminalRearmProbe.integrationPresentationState == .expanded, "current inside pointer keeps an explicitly shown panel expanded")
+        terminalPointer = outsidePointer
+        terminalRearmProbe.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification))
+        runLoop(for: 1.2)
+        check(isRetracted(terminalRearmProbe.integrationPresentationState), "resize terminal resamples a missed pointer exit and rearms retraction")
+        terminalRearmProbe.hide()
+        runLoop(for: 0.2)
 
         var probePointer = NSPoint(x: -10_000, y: -10_000)
         let panelProbe = FloatingPanelController(model: model, pointerLocationProvider: { probePointer })

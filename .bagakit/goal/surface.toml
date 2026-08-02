@@ -1,0 +1,28 @@
+schema_version = 1
+protocol_version = "bagakit.goal.v.0.3"
+surface_id = "goal-runtime"
+surface_root = ".bagakit/goal"
+owner_kind = "skill"
+owner_id = "bagakit-set-loop-goal"
+lifecycle_class = "durable_state"
+edit_policy = "mixed"
+cleanup_safe = false
+source_of_truth = [
+  "docs/specs/runtime-surface-contract.md",
+  "skills/harness/bagakit-set-loop-goal/SKILL.md",
+  "skills/harness/bagakit-set-loop-goal/references/goal-file-contract.md",
+  "skills/harness/bagakit-set-loop-goal/references/event-stream-contract.md",
+  "skills/harness/bagakit-set-loop-goal/references/protocol-upgrade-contract.md",
+  "skills/harness/bagakit-set-loop-goal/references/loop-off-loop.md",
+]
+reviewable_outputs = [
+  "current.md",
+  "state.yaml",
+  "supervisor.md",
+  "<goal-id>.md",
+  "events/<goal-id>.jsonl",
+  "reviews/<review-id>.json",
+  "upgrade.json",
+  "archive/<goal-id>.md",
+  "archive/<goal-id>.events.jsonl",
+]
