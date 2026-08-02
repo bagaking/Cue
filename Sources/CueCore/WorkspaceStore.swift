@@ -1,150 +1,130 @@
-import CryptoKit
 import Foundation
 
 public final class WorkspaceStore {
+    private typealias TransactionHook = (WorkspaceTransactionFailpoint, WorkspaceTransactionContext) throws -> Void
+
+    private struct DirectoryIdentity: Equatable {
+        var volume: UInt64
+        var file: UInt64
+    }
+
     private let fileManager: FileManager
     private let backupLimit: Int
+    private let transactionHook: TransactionHook?
 
-    public init(
+    public init(fileManager: FileManager = .default, backupLimit: Int = 10) {
+        self.fileManager = fileManager
+        self.backupLimit = max(backupLimit, 10)
+        transactionHook = nil
+    }
+
+    @_spi(Testing) public init(
         fileManager: FileManager = .default,
-        backupLimit: Int = 10
+        backupLimit: Int = 10,
+        transactionHook: @escaping (
+            WorkspaceTransactionFailpoint,
+            WorkspaceTransactionContext
+        ) throws -> Void
     ) {
         self.fileManager = fileManager
         self.backupLimit = max(backupLimit, 10)
+        self.transactionHook = transactionHook
+    }
+
+    public func loadSnapshot(from url: URL) throws -> WorkspaceSnapshot {
+        try validatePackageURL(url)
+        let requestedURL = url.standardizedFileURL
+        let inspection = try coordinatedInspection(at: requestedURL)
+        return makeSnapshot(url: requestedURL, inspection: inspection)
+    }
+
+    public func createSnapshot(
+        document: WorkspaceDocument,
+        at url: URL
+    ) throws -> WorkspaceCommitReceipt {
+        try validatePackageURL(url)
+        let requestedURL = url.standardizedFileURL
+        try fileManager.createDirectory(
+            at: requestedURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        guard !fileManager.fileExists(atPath: requestedURL.path) else {
+            throw WorkspaceStoreError.externalModification
+        }
+        let plan = try CuePackagePlanner.planSchema3Creation(for: document)
+        let stageURL = try prepareStage(plan: plan, nextTo: requestedURL)
+        return try publishCreation(plan: plan, stageURL: stageURL, requestedURL: requestedURL)
+    }
+
+    public func commit(
+        document: WorkspaceDocument,
+        basedOn snapshot: WorkspaceSnapshot
+    ) throws -> WorkspaceCommitReceipt {
+        switch snapshot.writeCapability {
+        case .writableSchema3, .requiresVerifiedSchema2Migration:
+            break
+        case let .readOnly(reason):
+            throw WorkspaceStoreError.readOnly(reason)
+        }
+        guard snapshot.conflicts.isEmpty else {
+            throw WorkspaceStoreError.invalidDocument("workspace has unresolved storage conflicts")
+        }
+        let plan = try CuePackagePlanner.planSchema3Write(
+            from: snapshot.inspection,
+            document: document
+        )
+        guard plan.sourcePackageRevision == snapshot.revision else {
+            throw WorkspaceStoreError.invalidDocument("write plan is not bound to the supplied snapshot")
+        }
+        let stageURL = try prepareStage(plan: plan, nextTo: snapshot.packageURL)
+        return try publishReplacement(
+            plan: plan,
+            stageURL: stageURL,
+            snapshot: snapshot
+        )
     }
 
     public func create(document: WorkspaceDocument, at url: URL) throws -> FileFingerprint {
-        try validatePackageURL(url)
-        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        guard !fileManager.fileExists(atPath: url.path) else {
-            throw WorkspaceStoreError.externalModification
-        }
-        try fileManager.createDirectory(at: url, withIntermediateDirectories: false)
-        do {
-            let fingerprint = try write(document: document, to: url, expectedFingerprint: nil)
-            return fingerprint
-        } catch {
-            try? fileManager.removeItem(at: url)
-            throw error
-        }
+        fingerprint(for: try createSnapshot(document: document, at: url).snapshot)
     }
 
     public func load(from url: URL) throws -> (WorkspaceDocument, FileFingerprint) {
-        try validatePackageURL(url)
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            throw WorkspaceStoreError.missingFile
+        let snapshot = try loadSnapshot(from: url)
+        guard let document = snapshot.document else {
+            if case let .readOnly(reason) = snapshot.writeCapability {
+                throw WorkspaceStoreError.readOnly(reason)
+            }
+            throw WorkspaceStoreError.invalidDocument("workspace did not produce a document")
         }
-        guard isDirectory.boolValue else {
-            throw WorkspaceStoreError.invalidDocument("Cue workspaces are `.cue` packages, not single files")
-        }
-
-        do {
-            let manifestURL = url.appendingPathComponent(WorkspacePackageCodec.manifestPath)
-            guard fileManager.fileExists(atPath: manifestURL.path) else {
-                throw WorkspaceStoreError.invalidDocument("workspace package has no manifest.yaml")
-            }
-            let manifest = try WorkspacePackageCodec.decodeManifest(Data(contentsOf: manifestURL))
-            var sections: [WorkSection] = []
-            for path in manifest.sectionPaths {
-                let section = try WorkspacePackageCodec.decodeSection(Data(contentsOf: url.appendingPathComponent(path)))
-                guard WorkspacePackageCodec.sectionPath(section) == path else {
-                    throw WorkspaceStoreError.invalidDocument("section path does not match its identifier")
-                }
-                sections.append(section)
-            }
-
-            let tombstones = try WorkspacePackageCodec.allTombstones(at: url, fileManager: fileManager)
-            guard tombstones.values.allSatisfy({ $0.workspaceID == manifest.workspaceID }) else {
-                throw WorkspaceStoreError.invalidDocument("tombstone belongs to a different workspace")
-            }
-            var items: [WorkItem] = []
-            for path in manifest.itemPaths {
-                let item = try WorkspacePackageCodec.decodeItem(Data(contentsOf: url.appendingPathComponent(path)), workspaceID: manifest.workspaceID)
-                guard WorkspacePackageCodec.itemPath(item) == path else {
-                    throw WorkspaceStoreError.invalidDocument("item path does not match its identifier or creation date")
-                }
-                if let tombstone = tombstones[item.id], tombstone.deletedAt >= item.updatedAt { continue }
-                items.append(item)
-            }
-
-            guard Set(sections.map(\.id)).count == sections.count else {
-                throw WorkspaceStoreError.invalidDocument("duplicate section identifiers")
-            }
-            guard Set(items.map(\.id)).count == items.count else {
-                throw WorkspaceStoreError.invalidDocument("duplicate item identifiers")
-            }
-
-            var document = WorkspaceDocument(
-                schemaVersion: WorkspacePackageCodec.schemaVersion,
-                id: manifest.workspaceID,
-                title: manifest.title,
-                sections: sections,
-                items: items,
-                layout: []
-            )
-            document.ensureInbox()
-            let validSectionIDs = Set(document.sections.map(\.id))
-            let inboxID = document.inbox.id
-            for index in document.items.indices where !validSectionIDs.contains(document.items[index].sectionID) {
-                document.items[index].sectionID = inboxID
-            }
-            document.normalizeOrder()
-            let fingerprint = try fingerprint(for: url)
-            return (document, fingerprint)
-        } catch let error as WorkspaceStoreError {
-            throw error
-        } catch {
-            throw WorkspaceStoreError.invalidDocument(error.localizedDescription)
-        }
+        return (document, fingerprint(for: snapshot))
     }
 
     @discardableResult
     public func write(
-        document source: WorkspaceDocument,
+        document: WorkspaceDocument,
         to url: URL,
         expectedFingerprint: FileFingerprint?
     ) throws -> FileFingerprint {
-        try validatePackageURL(url)
-        let exists = fileManager.fileExists(atPath: url.path)
-        let hasManifest = fileManager.fileExists(atPath: url.appendingPathComponent(WorkspacePackageCodec.manifestPath).path)
-        if let expectedFingerprint {
-            guard exists else { throw WorkspaceStoreError.missingFile }
-            guard try fingerprint(for: url) == expectedFingerprint else {
-                throw WorkspaceStoreError.externalModification
-            }
-        } else if exists, hasManifest {
+        if !fileManager.fileExists(atPath: url.path) {
+            guard expectedFingerprint == nil else { throw WorkspaceStoreError.missingFile }
+            return try create(document: document, at: url)
+        }
+        guard let expectedFingerprint else {
             throw WorkspaceStoreError.externalModification
         }
-
-        var document = source
-        document.ensureInbox()
-        document.normalizeOrder()
-        document.schemaVersion = WorkspacePackageCodec.schemaVersion
-
-        let previous = hasManifest ? try? load(from: url).0 : nil
-        let previousIDs = Set(previous?.items.map(\.id) ?? [])
-        let intendedIDs = Set(document.items.map(\.id))
-        let deletedIDs = previousIDs.subtracting(intendedIDs)
-        let manifest = WorkspacePackageCodec.manifest(for: document)
-        let files = try encodedFiles(for: document, manifest: manifest, deletedIDs: deletedIDs)
-
-        let backupURL = hasManifest ? try createBackup(of: url) : nil
-        do {
-            try apply(files: files, manifest: manifest, to: url)
-            let (validated, fingerprint) = try load(from: url)
-            let canonicalDocument = try canonicalized(document)
-            guard sameWorkspaceContent(validated, canonicalDocument) else {
-                throw WorkspaceStoreError.invalidDocument("post-write package did not match the intended workspace")
-            }
-            return fingerprint
-        } catch {
-            if let backupURL {
-                try? restoreBackup(backupURL, to: url)
-            }
-            if let storeError = error as? WorkspaceStoreError { throw storeError }
-            throw WorkspaceStoreError.writeFailure(error.localizedDescription)
+        let snapshot = try loadSnapshot(from: url)
+        guard fingerprint(for: snapshot) == expectedFingerprint else {
+            throw WorkspaceStoreError.externalModification
         }
+        let receipt = try commit(document: document, basedOn: snapshot)
+        guard sameLogicalURL(receipt.publishedURL, url.standardizedFileURL) else {
+            throw WorkspaceStoreError.publicationRecoveryRequired(recoveryEvidence(
+                sourceRevision: snapshot.revision,
+                targetRevision: receipt.snapshot.revision,
+                urls: [url, receipt.publishedURL, receipt.retainedBackupURL]
+            ))
+        }
+        return fingerprint(for: receipt.snapshot)
     }
 
     public func saveConflictCopy(document: WorkspaceDocument, nextTo url: URL) throws -> URL {
@@ -153,164 +133,447 @@ public final class WorkspaceStore {
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let stem = url.deletingPathExtension().lastPathComponent
         let parent = url.deletingLastPathComponent()
-        var copy = parent.appendingPathComponent("\(stem).cue-conflict-\(formatter.string(from: Date())).cue", isDirectory: true)
+        var copy = parent.appendingPathComponent(
+            "\(stem).cue-conflict-\(formatter.string(from: Date())).cue",
+            isDirectory: true
+        )
         var suffix = 2
         while fileManager.fileExists(atPath: copy.path) {
-            copy = parent.appendingPathComponent("\(stem).cue-conflict-\(formatter.string(from: Date()))-\(suffix).cue", isDirectory: true)
+            copy = parent.appendingPathComponent(
+                "\(stem).cue-conflict-\(formatter.string(from: Date()))-\(suffix).cue",
+                isDirectory: true
+            )
             suffix += 1
         }
-        _ = try create(document: document, at: copy)
+        _ = try createSnapshot(document: document, at: copy)
         return copy
     }
 
     public func fingerprint(for url: URL) throws -> FileFingerprint {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
-            throw WorkspaceStoreError.missingFile
-        }
-        guard isDirectory.boolValue else {
-            throw WorkspaceStoreError.invalidDocument("workspace path is not a package")
-        }
-
-        let files = try sourceFiles(in: url)
-        var hasher = SHA256()
-        var totalSize: UInt64 = 0
-        var modifiedAt = Date.distantPast
-        for file in files {
-            let relative = relativePath(of: file, to: url)
-            let data = try Data(contentsOf: file)
-            hasher.update(data: Data(relative.utf8))
-            hasher.update(data: Data([0]))
-            hasher.update(data: data)
-            totalSize += UInt64(data.count)
-            let values = try file.resourceValues(forKeys: [.contentModificationDateKey])
-            modifiedAt = max(modifiedAt, values.contentModificationDate ?? .distantPast)
-        }
-        let digest = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        return FileFingerprint(size: totalSize, modifiedAt: modifiedAt, digest: digest)
+        fingerprint(for: try loadSnapshot(from: url))
     }
 
-    private func encodedFiles(
-        for document: WorkspaceDocument,
-        manifest: WorkspacePackageCodec.Manifest,
-        deletedIDs: Set<UUID>
-    ) throws -> [String: Data] {
-        var files: [String: Data] = [
-            WorkspacePackageCodec.manifestPath: try WorkspacePackageCodec.encodeManifest(manifest),
-        ]
-        for section in document.sections {
-            files[WorkspacePackageCodec.sectionPath(section)] = try WorkspacePackageCodec.encodeSection(section)
-        }
-        for item in document.items {
-            files[WorkspacePackageCodec.itemPath(item)] = try WorkspacePackageCodec.encodeItem(item, workspaceID: document.id)
-        }
-        for id in deletedIDs {
-            let tombstone = WorkspacePackageCodec.Tombstone(workspaceID: document.id, itemID: id, deletedAt: Date())
-            files[WorkspacePackageCodec.tombstonePath(for: id)] = try WorkspacePackageCodec.encodeTombstone(tombstone)
-        }
-        return files
-    }
-
-    private func apply(
-        files: [String: Data],
-        manifest: WorkspacePackageCodec.Manifest,
-        to root: URL
-    ) throws {
-        try fileManager.createDirectory(at: root, withIntermediateDirectories: true)
-        for path in ["sections", "items", "tombstones", "assets/sha256"] {
-            try fileManager.createDirectory(at: root.appendingPathComponent(path, isDirectory: true), withIntermediateDirectories: true)
-        }
-
-        let previousManifestURL = root.appendingPathComponent(WorkspacePackageCodec.manifestPath)
-        let previousManifest = try? WorkspacePackageCodec.decodeManifest(Data(contentsOf: previousManifestURL))
-        let manifestData = files[WorkspacePackageCodec.manifestPath]!
-
-        for path in files.keys.sorted() where path != WorkspacePackageCodec.manifestPath {
-            let destination = root.appendingPathComponent(path)
-            let data = files[path]!
-            if (try? Data(contentsOf: destination)) != data {
-                try atomicWrite(data, to: destination)
+    private func coordinatedInspection(at url: URL) throws -> CuePackageInspection {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<CuePackageInspection, Error>?
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinationError) { accessorURL in
+            result = Result {
+                try CuePackagePlanner.inspect(atCoordinatedAccessorURL: accessorURL, fileManager: fileManager)
             }
         }
-
-        if (try? Data(contentsOf: previousManifestURL)) != manifestData {
-            try atomicWrite(manifestData, to: previousManifestURL)
+        if let coordinationError { throw coordinationError }
+        guard let result else {
+            throw WorkspaceStoreError.writeFailure("coordinated read accessor did not run")
         }
-
-        let retainedPaths = Set(manifest.sectionPaths + manifest.itemPaths)
-        let stalePaths = Set((previousManifest?.sectionPaths ?? []) + (previousManifest?.itemPaths ?? []))
-            .subtracting(retainedPaths)
-        for path in stalePaths {
-            let staleURL = root.appendingPathComponent(path)
-            if fileManager.fileExists(atPath: staleURL.path) { try fileManager.removeItem(at: staleURL) }
-        }
+        return try result.get()
     }
 
-    private func atomicWrite(_ data: Data, to url: URL) throws {
-        let parent = url.deletingLastPathComponent()
-        try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
-        let temporary = parent.appendingPathComponent(".\(url.lastPathComponent).cue-tmp-\(UUID().uuidString)")
-        do {
-            try data.write(to: temporary, options: [])
-            let handle = try FileHandle(forWritingTo: temporary)
+    private func makeSnapshot(url: URL, inspection: CuePackageInspection) -> WorkspaceSnapshot {
+        var document = inspection.document
+        if document != nil {
+            document!.schemaVersion = WorkspaceDocument.currentSchema
+            document!.layout = []
+            document!.ensureInbox()
+            document!.normalizeOrder()
+        }
+        return WorkspaceSnapshot(packageURL: url, document: document, inspection: inspection)
+    }
+
+    private func fingerprint(for snapshot: WorkspaceSnapshot) -> FileFingerprint {
+        FileFingerprint(
+            size: UInt64(snapshot.inspection.rawFiles.values.reduce(0) { $0 + $1.count }),
+            modifiedAt: .distantPast,
+            digest: snapshot.revision.rawValue
+        )
+    }
+
+    private func prepareStage(plan: CueSchema3PackagePlan, nextTo requestedURL: URL) throws -> URL {
+        let parent = requestedURL.deletingLastPathComponent()
+        let stageURL = parent.appendingPathComponent(
+            ".\(requestedURL.deletingPathExtension().lastPathComponent).cue-stage-\(UUID().uuidString).cue",
+            isDirectory: true
+        )
+        var keepStage = false
+        defer {
+            if !keepStage, fileManager.fileExists(atPath: stageURL.path) {
+                try? fileManager.removeItem(at: stageURL)
+            }
+        }
+        try fileManager.createDirectory(at: stageURL, withIntermediateDirectories: false)
+        for directory in plan.directories.sorted(by: directoryOrder) {
+            try fileManager.createDirectory(
+                at: stageURL.appendingPathComponent(directory, isDirectory: true),
+                withIntermediateDirectories: true
+            )
+        }
+        for file in plan.files {
+            let destination = stageURL.appendingPathComponent(file.path)
+            try fileManager.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try file.data.write(to: destination, options: [])
+            let handle = try FileHandle(forWritingTo: destination)
             try handle.synchronize()
             try handle.close()
-            if fileManager.fileExists(atPath: url.path) {
-                _ = try fileManager.replaceItemAt(url, withItemAt: temporary)
-            } else {
-                try fileManager.moveItem(at: temporary, to: url)
+        }
+        try invoke(.afterStageSynchronized, requestedURL: requestedURL, stageURL: stageURL)
+        let staged = try CuePackagePlanner.inspect(
+            atCoordinatedAccessorURL: stageURL,
+            fileManager: fileManager
+        )
+        guard staged.packageRevision == plan.targetPackageRevision,
+              staged.writeCapability == .writableSchema3 else {
+            throw WorkspaceStoreError.invalidDocument("staged package did not reopen as the exact target")
+        }
+        try invoke(.afterStageValidated, requestedURL: requestedURL, stageURL: stageURL)
+        keepStage = true
+        return stageURL
+    }
+
+    private func publishCreation(
+        plan: CueSchema3PackagePlan,
+        stageURL: URL,
+        requestedURL: URL
+    ) throws -> WorkspaceCommitReceipt {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<WorkspaceCommitReceipt, Error>?
+        var publicationInvoked = false
+        let requestedParent = requestedURL.deletingLastPathComponent()
+        coordinator.coordinate(writingItemAt: requestedParent, options: [], error: &coordinationError) { accessorParent in
+            let accessorURL = accessorParent.appendingPathComponent(
+                requestedURL.lastPathComponent,
+                isDirectory: true
+            )
+            do {
+                guard !fileManager.fileExists(atPath: accessorURL.path) else {
+                    throw WorkspaceStoreError.externalModification
+                }
+                try requireStageBesideAccessor(stageURL: stageURL, accessorURL: accessorURL)
+                try invoke(.afterRevisionConfirmed, requestedURL: requestedURL, stageURL: stageURL)
+                publicationInvoked = true
+                try fileManager.moveItem(at: stageURL, to: accessorURL)
+                try invoke(
+                    .afterReplacement,
+                    requestedURL: requestedURL,
+                    stageURL: stageURL,
+                    publishedURL: accessorURL
+                )
+                let published = try CuePackagePlanner.inspect(
+                    atCoordinatedAccessorURL: accessorURL,
+                    fileManager: fileManager
+                )
+                guard published.packageRevision == plan.targetPackageRevision else {
+                    throw WorkspaceStoreError.invalidDocument("created package does not match the exact target")
+                }
+                try invoke(
+                    .afterPublishedValidation,
+                    requestedURL: requestedURL,
+                    stageURL: stageURL,
+                    publishedURL: accessorURL
+                )
+                result = .success(WorkspaceCommitReceipt(
+                    snapshot: makeSnapshot(url: accessorURL, inspection: published),
+                    publishedURL: accessorURL,
+                    retainedBackupURL: nil
+                ))
+            } catch {
+                if publicationInvoked {
+                    result = .failure(WorkspaceStoreError.publicationRecoveryRequired(recoveryEvidence(
+                        sourceRevision: nil,
+                        targetRevision: plan.targetPackageRevision,
+                        urls: [requestedURL, accessorURL, stageURL]
+                    )))
+                } else {
+                    result = .failure(error)
+                }
             }
+        }
+        if let coordinationError {
+            if publicationInvoked {
+                throw WorkspaceStoreError.publicationRecoveryRequired(recoveryEvidence(
+                    sourceRevision: nil,
+                    targetRevision: plan.targetPackageRevision,
+                    urls: [requestedURL, stageURL]
+                ))
+            }
+            cleanupStage(stageURL)
+            throw coordinationError
+        }
+        guard let result else {
+            cleanupStage(stageURL)
+            throw WorkspaceStoreError.writeFailure("coordinated create accessor did not run")
+        }
+        do {
+            return try result.get()
         } catch {
-            try? fileManager.removeItem(at: temporary)
+            if !publicationInvoked { cleanupStage(stageURL) }
             throw error
         }
     }
 
-    private func createBackup(of url: URL) throws -> URL {
-        let directory = url.deletingLastPathComponent().appendingPathComponent(".cue-backups", isDirectory: true)
+    private func publishReplacement(
+        plan: CueSchema3PackagePlan,
+        stageURL: URL,
+        snapshot: WorkspaceSnapshot
+    ) throws -> WorkspaceCommitReceipt {
+        let requestedURL = snapshot.packageURL
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var result: Result<WorkspaceCommitReceipt, Error>?
+        var publicationInvoked = false
+        var recoveryURLs: [URL?] = [requestedURL, stageURL]
+
+        coordinator.coordinate(writingItemAt: requestedURL, options: [], error: &coordinationError) { accessorURL in
+            let backupName = ".\(requestedURL.deletingPathExtension().lastPathComponent).cue-prior-\(UUID().uuidString).cue"
+            let adjacentBackupURL = accessorURL.deletingLastPathComponent()
+                .appendingPathComponent(backupName, isDirectory: true)
+            recoveryURLs.append(accessorURL)
+            recoveryURLs.append(adjacentBackupURL)
+            do {
+                try requireStageBesideAccessor(stageURL: stageURL, accessorURL: accessorURL)
+                let live = try CuePackagePlanner.inspect(
+                    atCoordinatedAccessorURL: accessorURL,
+                    fileManager: fileManager
+                )
+                guard live.packageRevision == snapshot.revision else {
+                    throw WorkspaceStoreError.externalModification
+                }
+                try invoke(
+                    .afterRevisionConfirmed,
+                    requestedURL: requestedURL,
+                    stageURL: stageURL,
+                    adjacentBackupURL: adjacentBackupURL
+                )
+
+                publicationInvoked = true
+                let returnedURL: URL?
+                do {
+                    returnedURL = try fileManager.replaceItemAt(
+                        accessorURL,
+                        withItemAt: stageURL,
+                        backupItemName: backupName,
+                        options: [.withoutDeletingBackupItem]
+                    )
+                } catch {
+                    recoveryURLs.append(
+                        (error as NSError).userInfo["NSFileOriginalItemLocationKey"] as? URL
+                    )
+                    throw error
+                }
+                recoveryURLs.append(returnedURL)
+                guard let returnedURL, sameLogicalURL(returnedURL, accessorURL) else {
+                    throw WorkspaceStoreError.writeFailure("safe replacement returned an ambiguous package URL")
+                }
+                try invoke(
+                    .afterReplacement,
+                    requestedURL: requestedURL,
+                    stageURL: stageURL,
+                    adjacentBackupURL: adjacentBackupURL,
+                    publishedURL: returnedURL
+                )
+
+                let published = try CuePackagePlanner.inspect(
+                    atCoordinatedAccessorURL: returnedURL,
+                    fileManager: fileManager
+                )
+                let displaced = try CuePackagePlanner.inspect(
+                    atCoordinatedAccessorURL: adjacentBackupURL,
+                    fileManager: fileManager
+                )
+                guard published.packageRevision == plan.targetPackageRevision,
+                      displaced.packageRevision == snapshot.revision else {
+                    throw WorkspaceStoreError.invalidDocument("replacement did not preserve exact old and new packages")
+                }
+                let archivedBackup = try archiveBackup(
+                    adjacentBackupURL,
+                    sourceRevision: snapshot.revision,
+                    nextTo: returnedURL
+                )
+                recoveryURLs.append(archivedBackup)
+                try invoke(
+                    .afterPublishedValidation,
+                    requestedURL: requestedURL,
+                    stageURL: stageURL,
+                    adjacentBackupURL: archivedBackup,
+                    publishedURL: returnedURL
+                )
+                result = .success(WorkspaceCommitReceipt(
+                    snapshot: makeSnapshot(url: returnedURL, inspection: published),
+                    publishedURL: returnedURL,
+                    retainedBackupURL: archivedBackup
+                ))
+            } catch {
+                if publicationInvoked {
+                    result = .failure(WorkspaceStoreError.publicationRecoveryRequired(recoveryEvidence(
+                        sourceRevision: snapshot.revision,
+                        targetRevision: plan.targetPackageRevision,
+                        urls: recoveryURLs
+                    )))
+                } else {
+                    result = .failure(error)
+                }
+            }
+        }
+        if let coordinationError {
+            if publicationInvoked {
+                throw WorkspaceStoreError.publicationRecoveryRequired(recoveryEvidence(
+                    sourceRevision: snapshot.revision,
+                    targetRevision: plan.targetPackageRevision,
+                    urls: recoveryURLs
+                ))
+            }
+            cleanupStage(stageURL)
+            throw coordinationError
+        }
+        guard let result else {
+            cleanupStage(stageURL)
+            throw WorkspaceStoreError.writeFailure("coordinated write accessor did not run")
+        }
+        do {
+            return try result.get()
+        } catch {
+            if !publicationInvoked { cleanupStage(stageURL) }
+            throw error
+        }
+    }
+
+    private func archiveBackup(
+        _ adjacentBackupURL: URL,
+        sourceRevision: CuePackageRevision,
+        nextTo publishedURL: URL
+    ) throws -> URL {
+        let directory = publishedURL.deletingLastPathComponent()
+            .appendingPathComponent(".cue-backups", isDirectory: true)
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let finalURL = directory.appendingPathComponent(
+            "\(publishedURL.deletingPathExtension().lastPathComponent)-\(timestamp())-\(UUID().uuidString).cue",
+            isDirectory: true
+        )
+        let archiveStage = directory.appendingPathComponent(
+            ".archive-stage-\(UUID().uuidString).cue",
+            isDirectory: true
+        )
+        do {
+            try fileManager.copyItem(at: adjacentBackupURL, to: archiveStage)
+            guard try CuePackagePlanner.inspect(
+                atCoordinatedAccessorURL: archiveStage,
+                fileManager: fileManager
+            ).packageRevision == sourceRevision else {
+                throw WorkspaceStoreError.invalidDocument("backup archive stage changed the prior package")
+            }
+            try fileManager.moveItem(at: archiveStage, to: finalURL)
+            guard try CuePackagePlanner.inspect(
+                atCoordinatedAccessorURL: finalURL,
+                fileManager: fileManager
+            ).packageRevision == sourceRevision else {
+                throw WorkspaceStoreError.invalidDocument("retained backup does not match the prior package")
+            }
+            try fileManager.removeItem(at: adjacentBackupURL)
+            pruneBackups(in: directory, preserving: finalURL)
+            return finalURL
+        } catch {
+            if fileManager.fileExists(atPath: archiveStage.path) {
+                try? fileManager.removeItem(at: archiveStage)
+            }
+            throw error
+        }
+    }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
-        let backup = directory.appendingPathComponent("\(url.deletingPathExtension().lastPathComponent)-\(formatter.string(from: Date())).cue", isDirectory: true)
-        try fileManager.copyItem(at: url, to: backup)
-
-        let backups = try fileManager.contentsOfDirectory(
+    private func pruneBackups(in directory: URL, preserving: URL) {
+        guard let backups = try? fileManager.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey],
             options: [.skipsHiddenFiles]
-        ).filter { $0.pathExtension.lowercased() == "cue" }
-            .sorted {
-                let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                return lhs > rhs
+        ).filter({ $0.pathExtension.lowercased() == "cue" }).sorted(by: {
+            let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return lhs > rhs
+        }) else { return }
+        for old in backups.dropFirst(backupLimit) where old != preserving {
+            try? fileManager.removeItem(at: old)
+        }
+    }
+
+    private func requireStageBesideAccessor(stageURL: URL, accessorURL: URL) throws {
+        let stageParent = stageURL.deletingLastPathComponent()
+        let accessorParent = accessorURL.deletingLastPathComponent()
+        guard try directoryIdentity(stageParent) == directoryIdentity(accessorParent) else {
+            throw WorkspaceStoreError.externalModification
+        }
+    }
+
+    private func directoryIdentity(_ url: URL) throws -> DirectoryIdentity {
+        let values = try fileManager.attributesOfItem(atPath: url.path)
+        guard let volume = (values[.systemNumber] as? NSNumber)?.uint64Value,
+              let file = (values[.systemFileNumber] as? NSNumber)?.uint64Value else {
+            throw WorkspaceStoreError.writeFailure("package parent identity is unavailable")
+        }
+        return DirectoryIdentity(volume: volume, file: file)
+    }
+
+    private func recoveryEvidence(
+        sourceRevision: CuePackageRevision?,
+        targetRevision: CuePackageRevision,
+        urls: [URL?]
+    ) -> WorkspacePublicationRecovery {
+        var seen = Set<String>()
+        let candidates = urls.compactMap { value -> WorkspaceRecoveryCandidate? in
+            guard let value else { return nil }
+            let url = value.standardizedFileURL
+            guard seen.insert(url.path).inserted else { return nil }
+            guard fileManager.fileExists(atPath: url.path) else {
+                return WorkspaceRecoveryCandidate(url: url, state: .missing)
             }
-        for oldBackup in backups.dropFirst(backupLimit) { try? fileManager.removeItem(at: oldBackup) }
-        return backup
-    }
-
-    private func restoreBackup(_ backup: URL, to url: URL) throws {
-        if fileManager.fileExists(atPath: url.path) { try fileManager.removeItem(at: url) }
-        try fileManager.copyItem(at: backup, to: url)
-    }
-
-    private func sourceFiles(in root: URL) throws -> [URL] {
-        guard let enumerator = fileManager.enumerator(
-            at: root,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-        return enumerator.compactMap { $0 as? URL }
-            .filter { url in
-                let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
-                return values?.isRegularFile == true
+            do {
+                let revision = try CuePackagePlanner.inspect(
+                    atCoordinatedAccessorURL: url,
+                    fileManager: fileManager
+                ).packageRevision
+                if revision == targetRevision {
+                    return WorkspaceRecoveryCandidate(url: url, state: .target)
+                }
+                if revision == sourceRevision {
+                    return WorkspaceRecoveryCandidate(url: url, state: .source)
+                }
+                return WorkspaceRecoveryCandidate(url: url, state: .other(revision))
+            } catch {
+                return WorkspaceRecoveryCandidate(url: url, state: .unreadable)
             }
-            .sorted { relativePath(of: $0, to: root) < relativePath(of: $1, to: root) }
+        }
+        return WorkspacePublicationRecovery(
+            sourceRevision: sourceRevision,
+            targetRevision: targetRevision,
+            candidates: candidates
+        )
     }
 
-    private func relativePath(of url: URL, to root: URL) -> String {
-        String(url.path.dropFirst(root.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    private func invoke(
+        _ failpoint: WorkspaceTransactionFailpoint,
+        requestedURL: URL,
+        stageURL: URL,
+        adjacentBackupURL: URL? = nil,
+        publishedURL: URL? = nil
+    ) throws {
+        try transactionHook?(failpoint, WorkspaceTransactionContext(
+            requestedURL: requestedURL,
+            stageURL: stageURL,
+            adjacentBackupURL: adjacentBackupURL,
+            publishedURL: publishedURL
+        ))
+    }
+
+    private func cleanupStage(_ stageURL: URL) {
+        if fileManager.fileExists(atPath: stageURL.path) {
+            try? fileManager.removeItem(at: stageURL)
+        }
+    }
+
+    private func sameLogicalURL(_ lhs: URL, _ rhs: URL) -> Bool {
+        lhs.standardizedFileURL.resolvingSymlinksInPath() ==
+            rhs.standardizedFileURL.resolvingSymlinksInPath()
     }
 
     private func validatePackageURL(_ url: URL) throws {
@@ -319,28 +582,16 @@ public final class WorkspaceStore {
         }
     }
 
-    private func canonicalized(_ source: WorkspaceDocument) throws -> WorkspaceDocument {
-        var document = source
-        document.ensureInbox()
-        document.normalizeOrder()
-        document.schemaVersion = WorkspacePackageCodec.schemaVersion
-        document.sections = try document.sections.map {
-            try WorkspacePackageCodec.decodeSection(WorkspacePackageCodec.encodeSection($0))
-        }
-        document.items = try document.items.map {
-            try WorkspacePackageCodec.decodeItem(
-                WorkspacePackageCodec.encodeItem($0, workspaceID: document.id),
-                workspaceID: document.id
-            )
-        }
-        document.layout = []
-        return document
+    private func timestamp() -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return formatter.string(from: Date())
     }
 
-    private func sameWorkspaceContent(_ lhs: WorkspaceDocument, _ rhs: WorkspaceDocument) -> Bool {
-        lhs.id == rhs.id &&
-            lhs.title == rhs.title &&
-            Dictionary(uniqueKeysWithValues: lhs.sections.map { ($0.id, $0) }) == Dictionary(uniqueKeysWithValues: rhs.sections.map { ($0.id, $0) }) &&
-            Dictionary(uniqueKeysWithValues: lhs.items.map { ($0.id, $0) }) == Dictionary(uniqueKeysWithValues: rhs.items.map { ($0.id, $0) })
+    private func directoryOrder(_ lhs: String, _ rhs: String) -> Bool {
+        let left = lhs.split(separator: "/").count
+        let right = rhs.split(separator: "/").count
+        return left == right ? lhs < rhs : left < right
     }
 }

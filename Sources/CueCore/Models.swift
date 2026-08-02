@@ -117,7 +117,7 @@ public enum MarkdownLayoutEntry: Codable, Equatable, Sendable {
 }
 
 public struct WorkspaceDocument: Codable, Equatable, Sendable {
-    public static let currentSchema = 2
+    public static let currentSchema = 3
 
     public var schemaVersion: Int
     public var id: UUID
@@ -183,10 +183,108 @@ public struct FileFingerprint: Equatable, Sendable {
     }
 }
 
+public struct WorkspaceSnapshot: Sendable {
+    public let packageURL: URL
+    public let document: WorkspaceDocument?
+    public let revision: CuePackageRevision
+    public let itemRecords: [CuePackageItemRecord]
+    public let tombstones: [CuePackageTombstone]
+    public let conflicts: [CuePackageConflict]
+    public let writeCapability: CuePackageWriteCapability
+
+    let inspection: CuePackageInspection
+
+    init(packageURL: URL, document: WorkspaceDocument?, inspection: CuePackageInspection) {
+        self.packageURL = packageURL
+        self.document = document
+        revision = inspection.packageRevision
+        itemRecords = inspection.itemRecords
+        tombstones = inspection.tombstones
+        conflicts = inspection.conflicts
+        writeCapability = inspection.writeCapability
+        self.inspection = inspection
+    }
+}
+
+public struct WorkspaceCommitReceipt: Sendable {
+    public let snapshot: WorkspaceSnapshot
+    public let publishedURL: URL
+    public let retainedBackupURL: URL?
+
+    public init(snapshot: WorkspaceSnapshot, publishedURL: URL, retainedBackupURL: URL?) {
+        self.snapshot = snapshot
+        self.publishedURL = publishedURL
+        self.retainedBackupURL = retainedBackupURL
+    }
+}
+
+public enum WorkspaceRecoveryCandidateState: Equatable, Sendable {
+    case missing
+    case source
+    case target
+    case other(CuePackageRevision)
+    case unreadable
+}
+
+public struct WorkspaceRecoveryCandidate: Equatable, Sendable {
+    public let url: URL
+    public let state: WorkspaceRecoveryCandidateState
+
+    public init(url: URL, state: WorkspaceRecoveryCandidateState) {
+        self.url = url
+        self.state = state
+    }
+}
+
+public struct WorkspacePublicationRecovery: Equatable, Sendable {
+    public let sourceRevision: CuePackageRevision?
+    public let targetRevision: CuePackageRevision
+    public let candidates: [WorkspaceRecoveryCandidate]
+
+    public init(
+        sourceRevision: CuePackageRevision?,
+        targetRevision: CuePackageRevision,
+        candidates: [WorkspaceRecoveryCandidate]
+    ) {
+        self.sourceRevision = sourceRevision
+        self.targetRevision = targetRevision
+        self.candidates = candidates
+    }
+}
+
+@_spi(Testing) public enum WorkspaceTransactionFailpoint: String, CaseIterable, Sendable {
+    case afterStageSynchronized
+    case afterStageValidated
+    case afterRevisionConfirmed
+    case afterReplacement
+    case afterPublishedValidation
+}
+
+@_spi(Testing) public struct WorkspaceTransactionContext: Sendable {
+    public let requestedURL: URL
+    public let stageURL: URL
+    public let adjacentBackupURL: URL?
+    public let publishedURL: URL?
+
+    public init(
+        requestedURL: URL,
+        stageURL: URL,
+        adjacentBackupURL: URL?,
+        publishedURL: URL?
+    ) {
+        self.requestedURL = requestedURL
+        self.stageURL = stageURL
+        self.adjacentBackupURL = adjacentBackupURL
+        self.publishedURL = publishedURL
+    }
+}
+
 public enum WorkspaceStoreError: LocalizedError, Equatable {
     case externalModification
     case missingFile
     case invalidDocument(String)
+    case readOnly(CuePackageReadOnlyReason)
+    case publicationRecoveryRequired(WorkspacePublicationRecovery)
     case writeFailure(String)
 
     public var errorDescription: String? {
@@ -197,6 +295,10 @@ public enum WorkspaceStoreError: LocalizedError, Equatable {
             "The workspace package moved or is unavailable."
         case let .invalidDocument(message):
             "The workspace could not be read: \(message)"
+        case .readOnly:
+            "The workspace uses content Cue cannot safely write."
+        case .publicationRecoveryRequired:
+            "The workspace publication needs recovery review; Cue preserved every available package."
         case let .writeFailure(message):
             "The workspace could not be saved: \(message)"
         }

@@ -130,12 +130,19 @@ public struct CuePlannedPackageFile: Equatable, Sendable {
 /// filesystem publication method; coordinated staging and replacement belong
 /// to the later transaction slice.
 public struct CueSchema3PackagePlan: Equatable, Sendable {
-    public let sourcePackageRevision: CuePackageRevision
+    public let sourcePackageRevision: CuePackageRevision?
+    public let targetPackageRevision: CuePackageRevision
     public let directories: [String]
     public let files: [CuePlannedPackageFile]
 
-    init(sourcePackageRevision: CuePackageRevision, directories: [String], files: [CuePlannedPackageFile]) {
+    init(
+        sourcePackageRevision: CuePackageRevision?,
+        targetPackageRevision: CuePackageRevision,
+        directories: [String],
+        files: [CuePlannedPackageFile]
+    ) {
         self.sourcePackageRevision = sourcePackageRevision
+        self.targetPackageRevision = targetPackageRevision
         self.directories = directories
         self.files = files
     }
@@ -297,6 +304,117 @@ public enum CuePackagePlanner {
         }
     }
 
+    static func planSchema3Creation(for source: WorkspaceDocument) throws -> CueSchema3PackagePlan {
+        try makeSchema3WritePlan(base: nil, sourceRevision: nil, source: source)
+    }
+
+    static func planSchema3Write(
+        from inspection: CuePackageInspection,
+        document source: WorkspaceDocument
+    ) throws -> CueSchema3PackagePlan {
+        let base: CuePackageInspection
+        switch inspection.writeCapability {
+        case .requiresVerifiedSchema2Migration:
+            let migration = try makeSchema3MigrationPlan(from: inspection)
+            base = try inspectSchema3(snapshotForPlan(directories: migration.directories, files: migration.files))
+        case .writableSchema3:
+            base = inspection
+        case let .readOnly(reason):
+            throw WorkspaceStoreError.readOnly(reason)
+        }
+        guard base.conflicts.isEmpty else {
+            throw invalid("workspace has unresolved storage conflicts")
+        }
+        return try makeSchema3WritePlan(
+            base: base,
+            sourceRevision: inspection.packageRevision,
+            source: source
+        )
+    }
+
+    private static func makeSchema3WritePlan(
+        base: CuePackageInspection?,
+        sourceRevision: CuePackageRevision?,
+        source: WorkspaceDocument
+    ) throws -> CueSchema3PackagePlan {
+        let document = try normalizedDraft(source)
+        if let base {
+            guard base.workspaceID == document.id else {
+                throw invalid("draft belongs to a different workspace")
+            }
+            if case let .readOnly(reason) = base.writeCapability {
+                throw WorkspaceStoreError.readOnly(reason)
+            }
+        }
+
+        var plannedFiles = base?.rawFiles ?? [:]
+        plannedFiles = plannedFiles.filter {
+            !$0.key.hasPrefix("sections/") && !$0.key.hasPrefix("items/") && $0.key != manifestPath
+        }
+        plannedFiles[manifestPath] = try encodeSchema3Manifest(.init(
+            schemaVersion: schemaVersion,
+            workspaceID: document.id,
+            title: document.title,
+            requiredFeatures: []
+        ))
+
+        let baseSections = Dictionary(uniqueKeysWithValues: (base?.document?.sections ?? []).map { ($0.id, $0) })
+        for section in document.sections {
+            let path = schema3SectionPath(section)
+            if baseSections[section.id] == section, let original = base?.rawFiles[path] {
+                plannedFiles[path] = original
+            } else {
+                plannedFiles[path] = try encoder().encode(
+                    Schema3SectionRecord(section: section, workspaceID: document.id)
+                ).addingTrailingNewline()
+            }
+        }
+
+        let baseItems = Dictionary(uniqueKeysWithValues: (base?.itemRecords ?? []).map {
+            ($0.record.item.id, $0)
+        })
+        let tombstoneIDs = Set((base?.tombstones ?? []).map(\.itemID))
+        let intendedIDs = Set(document.items.map(\.id))
+        guard intendedIDs.isDisjoint(with: tombstoneIDs) else {
+            throw invalid("draft cannot revive an item while its tombstone is retained")
+        }
+        for item in document.items {
+            var record = baseItems[item.id]?.record ?? CueItemRecord(workspaceID: document.id, item: item)
+            record.workspaceID = document.id
+            record.item = item
+            plannedFiles[schema3ItemPath(item)] = try CueItemRecordCodec.encode(record)
+        }
+        for removed in baseItems.values where !intendedIDs.contains(removed.record.item.id) &&
+            !tombstoneIDs.contains(removed.record.item.id) {
+            let tombstone = Schema3TombstoneRecord(
+                schemaVersion: schemaVersion,
+                workspaceID: document.id,
+                itemID: removed.record.item.id,
+                kind: "observed",
+                observedRevision: removed.revision.rawValue,
+                deletedAt: nil
+            )
+            plannedFiles[legacyTombstonePath(removed.record.item.id)] = try encoder().encode(tombstone).addingTrailingNewline()
+        }
+
+        let directories = plannedDirectories(for: plannedFiles.keys)
+        let files = plannedFiles.keys.sorted().map { CuePlannedPackageFile(path: $0, data: plannedFiles[$0]!) }
+        let targetSnapshot = try snapshotForPlan(directories: directories, files: files)
+        let verified = try inspectSchema3(targetSnapshot)
+        guard verified.writeCapability == .writableSchema3,
+              verified.conflicts.isEmpty,
+              let verifiedDocument = verified.document,
+              sameWorkspaceContent(verifiedDocument, document) else {
+            throw invalid("schema-3 write plan did not preserve the complete intended document")
+        }
+        return CueSchema3PackagePlan(
+            sourcePackageRevision: sourceRevision,
+            targetPackageRevision: targetSnapshot.revision,
+            directories: directories,
+            files: files
+        )
+    }
+
     private static func makeSchema3MigrationPlan(
         from inspection: CuePackageInspection
     ) throws -> CueSchema3PackagePlan {
@@ -349,9 +467,43 @@ public enum CuePackagePlanner {
         }
         return CueSchema3PackagePlan(
             sourcePackageRevision: inspection.packageRevision,
+            targetPackageRevision: planSnapshot.revision,
             directories: directories,
             files: files
         )
+    }
+
+    private static func normalizedDraft(_ source: WorkspaceDocument) throws -> WorkspaceDocument {
+        var document = source
+        document.ensureInbox()
+        document.normalizeOrder()
+        document.schemaVersion = schemaVersion
+        document.layout = []
+        for index in document.items.indices {
+            document.items[index].contentHash = ContentHasher.hash(document.items[index].body)
+            document.items[index] = try CueItemRecordCodec.decode(
+                CueItemRecordCodec.encode(CueItemRecord(
+                    workspaceID: document.id,
+                    item: document.items[index]
+                ))
+            ).item
+        }
+        try requireUnique(document.sections.map(\.id), label: "section")
+        try requireUnique(document.items.map(\.id), label: "item")
+        let sectionIDs = Set(document.sections.map(\.id))
+        guard document.items.allSatisfy({ sectionIDs.contains($0.sectionID) }) else {
+            throw invalid("draft item references a nonexistent section")
+        }
+        return document
+    }
+
+    private static func sameWorkspaceContent(_ lhs: WorkspaceDocument, _ rhs: WorkspaceDocument) -> Bool {
+        lhs.id == rhs.id &&
+            lhs.title == rhs.title &&
+            Dictionary(uniqueKeysWithValues: lhs.sections.map { ($0.id, $0) }) ==
+                Dictionary(uniqueKeysWithValues: rhs.sections.map { ($0.id, $0) }) &&
+            Dictionary(uniqueKeysWithValues: lhs.items.map { ($0.id, $0) }) ==
+                Dictionary(uniqueKeysWithValues: rhs.items.map { ($0.id, $0) })
     }
 
     private static func inspect(_ snapshot: TreeSnapshot) throws -> CuePackageInspection {

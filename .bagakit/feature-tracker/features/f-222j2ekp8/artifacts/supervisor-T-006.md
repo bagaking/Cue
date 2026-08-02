@@ -68,9 +68,13 @@
   independent final B2 code reviews and Feature Tracker validation pass; the
   final staged blob/message/allowlist review passed its code and message
   portions and blocked only on the stale owner-evidence wording corrected here
-- B2 is pending only commit and push. Coordinated snapshot/CAS, publication
-  failpoints, live package activation, and runtime qualification remain
-  unimplemented Slice C work.
+- Slice B2 is pushed as `de6dff5` on `origin/main`. Slice C now owns coordinated
+  snapshot/CAS and staged publication; AppModel snapshot adoption, Undo and
+  runtime qualification remain later closures.
+- Slice C pre-mutation transaction and adversarial reviews pass with a locked
+  S1-S5 process-failpoint matrix, authoritative accessor/returned-URL checks,
+  exact source/target revision recovery evidence, and no power-loss,
+  filesystem-general, non-participating-writer, or reliable-sync claim.
 
 ## Architecture handoff
 
@@ -149,10 +153,9 @@
 2. The minimal UI-framework-free `CueCore` extraction is pushed as `e07cb07`;
    legacy aggregate Markdown and derived search cache remain app-side, and the
    executable plus checks consume the sole Core package writer.
-3. Slice B1 is pushed as `ef8dc9a`; Slice B2 is staged with warnings, its exact
-   one full gate, both final reviews, and Tracker validation passing. Commit
-   and push B2, then land Slice C's coordinated transaction and snapshot-based
-   AppModel recovery/Undo as separate behavior closures.
+3. Slice B1 is pushed as `ef8dc9a` and Slice B2 as `de6dff5`. Land Slice C's
+   Foundation-only coordinated snapshot/transaction as one behavior closure,
+   then adopt snapshots in AppModel recovery/Undo separately.
 4. Keep transaction, migration/codec, privacy/runtime, and final adversarial
    reviewers read-only; correct root causes before each commit.
 5. Do not start T-007 attachments until Tracker has recorded T-006 gate,
@@ -165,3 +168,45 @@
 - do not use wall-clock last-write-wins for edit/delete
 - do not repair publication by deleting live then copying backup
 - do not touch or stage `scripts/package_app.sh` or `scripts/reauthorize.sh`
+
+## UI-priority pause HANDOFF_READY
+
+- pause owner: `/root/t006_writer_recovery` stopped at a command boundary on
+  2026-08-03 after the supervisor reported a newer user-priority UI request;
+  no App/UI mutation, new test admission, staging, commit, push, packaging, or
+  runtime operation remains in flight
+- Git identity: `HEAD == origin/main == de6dff527ca46fa200a4bbe4080fa51298423ac5`;
+  the index is empty
+- exact dirty ownership: this packet,
+  `Sources/CueCore/Models.swift`, `Sources/CueCore/CuePackagePlan.swift`,
+  `Sources/CueCore/WorkspaceStore.swift`, and
+  `Checks/CueCoreChecks/main.swift`; `.bagakit/git-message-craft/` remains
+  pre-existing user-owned untracked work
+- protected paths: `scripts/package_app.sh` and `scripts/reauthorize.sh` have
+  no diff and were not staged or executed
+- latest bounded mutation: Checks now contain ordinary thrown S4/S5 recovery
+  fixtures, a Checks-only `FileManager` override that performs the real
+  replacement and then throws, and explicit read-only/unresolved-conflict
+  pre-stage rejection fixtures; no production owner changed in this pause
+  round
+- last current-source compile evidence: `swift build` passed; a manual
+  Foundation-only `CueCore` build against the installed macOS 15.4 SDK also
+  passed under `/private/tmp/cue-t006-focused.9P8urz`
+- test evidence boundary: the latest executed focused binary reported 312
+  passed and 0 failed, but its timestamp predates the new fixtures and does
+  **not** prove the current `Checks/CueCoreChecks/main.swift`; recompiling the
+  check binary first hit the host's mismatched CLT compiler 6.3.0.123.5 versus
+  default SDK 26.4 compiler 6.3.0.123.4, then the SDK-15.4 retry correctly
+  rejected the existing SDK-26.4 `CueCore` module. No current-bytes Core total,
+  warnings-as-errors, full `scripts/check.sh`, or final review is claimed.
+- active process evidence: the only matching product/build/test process is the
+  preserved packaged Cue PID 43717; no `swiftc`, `swift build`, Core check, or
+  `scripts/check.sh` process remains
+- exact resume action: compile `CueCoreChecks` against the already-built
+  SDK-15.4 temporary `CueCore` module/library, run that focused binary outside
+  the tool sandbox for file coordination, then run warnings-as-errors and
+  independent current-byte review before admitting one final full gate
+- forbidden resume shortcuts: do not reuse the stale 312/0 binary as current
+  evidence, do not broaden into AppModel, attachments, UI, a second writer or
+  codec, and do not stage/commit/push until the supervisor explicitly resumes
+  this owner

@@ -1,4 +1,4 @@
-import CueCore
+@_spi(Testing) import CueCore
 import Foundation
 
 private var passed = 0
@@ -70,6 +70,101 @@ private func sampleDocument() -> WorkspaceDocument {
         order: 0
     )
     return WorkspaceDocument(title: "Launch", sections: [section], items: [item])
+}
+
+private func writeSchema2Package(_ source: WorkspaceDocument, to url: URL) throws {
+    let fileManager = FileManager.default
+    var document = source
+    document.ensureInbox()
+    document.normalizeOrder()
+    try fileManager.createDirectory(at: url, withIntermediateDirectories: false)
+    for path in ["sections", "items", "tombstones", "assets/sha256"] {
+        try fileManager.createDirectory(
+            at: url.appendingPathComponent(path, isDirectory: true),
+            withIntermediateDirectories: true
+        )
+    }
+    let formatter = ISO8601DateFormatter()
+    func date(_ value: Date?) -> Any { value.map(formatter.string) ?? NSNull() }
+    func nullable(_ value: String?) -> Any {
+        if let value { return value }
+        return NSNull()
+    }
+    func json(_ object: Any, pretty: Bool = true) throws -> Data {
+        var options: JSONSerialization.WritingOptions = [.sortedKeys]
+        if pretty { options.insert(.prettyPrinted) }
+        var data = try JSONSerialization.data(withJSONObject: object, options: options)
+        data.append(0x0A)
+        return data
+    }
+    func sectionPath(_ section: WorkSection) -> String {
+        "sections/\(section.id.uuidString.lowercased()).yaml"
+    }
+    func itemPath(_ item: WorkItem) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let parts = calendar.dateComponents([.year, .month], from: item.createdAt)
+        return String(
+            format: "items/%04d/%02d/%@.md",
+            parts.year ?? 1970,
+            parts.month ?? 1,
+            item.id.uuidString.lowercased()
+        )
+    }
+    let manifest: [String: Any] = [
+        "cue_schema": 2,
+        "cue_workspace_id": document.id.uuidString,
+        "title": document.title,
+        "sections": document.sections.map(sectionPath).sorted(),
+        "items": document.items.map(itemPath).sorted(),
+    ]
+    try json(manifest).write(to: url.appendingPathComponent("manifest.yaml"))
+    for section in document.sections {
+        try json([
+            "id": section.id.uuidString,
+            "title": section.title,
+            "order": section.order,
+            "is_collapsed": section.isCollapsed,
+        ]).write(to: url.appendingPathComponent(sectionPath(section)))
+    }
+    for item in document.items {
+        let metadata: [String: Any] = [
+            "cue_schema": 2,
+            "cue_workspace_id": document.id.uuidString,
+            "id": item.id.uuidString,
+            "kind": item.kind.rawValue,
+            "state": item.state.rawValue,
+            "section_id": item.sectionID.uuidString,
+            "source": [
+                "appName": nullable(item.source.appName),
+                "bundleIdentifier": nullable(item.source.bundleIdentifier),
+                "windowTitle": nullable(item.source.windowTitle),
+                "url": nullable(item.source.url),
+            ] as [String: Any],
+            "sensitivity": item.sensitivity.rawValue,
+            "created_at": formatter.string(from: item.createdAt),
+            "updated_at": formatter.string(from: item.updatedAt),
+            "completed_at": date(item.completedAt),
+            "archived_at": date(item.archivedAt),
+            "pinned": item.pinned,
+            "order": item.order,
+            "merged_from": item.mergedFrom.map(\.uuidString),
+            "merged_into": item.mergedInto?.uuidString ?? NSNull(),
+        ]
+        var metadataData = try json(metadata, pretty: false)
+        metadataData.removeLast()
+        var data = Data("<!-- cue:item ".utf8)
+        data.append(metadataData)
+        data.append(Data(" -->\n".utf8))
+        data.append(Data(item.body.utf8))
+        data.append(Data("\n<!-- /cue:item -->\n".utf8))
+        let destination = url.appendingPathComponent(itemPath(item))
+        try fileManager.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: destination)
+    }
 }
 
 private func checkMarkdown() {
@@ -341,7 +436,7 @@ private func checkPackagePlan() {
         let exactBody = "Case Fold\r\nNUL:\0\ndecomposed: e\u{0301}\nno final newline"
         source.items[0].body = exactBody
         source.items[0].contentHash = ContentHasher.hash(exactBody)
-        _ = try WorkspaceStore().create(document: source, at: schema2URL)
+        try writeSchema2Package(source, to: schema2URL)
 
         let legacyItemURL = try itemFile(in: schema2URL, suffix: ".md")
         var legacyText = try String(contentsOf: legacyItemURL, encoding: .utf8)
@@ -864,6 +959,13 @@ private func checkStorage() {
     do {
         let fingerprint = try store.create(document: document, at: url)
         check(FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.yaml").path), "package writes a readable manifest")
+        let freshManifest = try JSONSerialization.jsonObject(
+            with: Data(contentsOf: url.appendingPathComponent("manifest.yaml"))
+        ) as! [String: Any]
+        check(
+            Set(freshManifest.keys) == Set(["cue_schema", "cue_workspace_id", "title", "required_features"]),
+            "fresh WorkspaceStore creation writes a membership-free schema-3 manifest"
+        )
         let sectionURL = url.appendingPathComponent("sections/\(document.sections[0].id.uuidString.lowercased()).yaml")
         check(FileManager.default.fileExists(atPath: sectionURL.path), "package writes one section record per section")
         let itemURL = try FileManager.default.contentsOfDirectory(
@@ -873,7 +975,7 @@ private func checkStorage() {
             (try? FileManager.default.contentsOfDirectory(at: year, includingPropertiesForKeys: nil)) ?? []
         }.flatMap { month in
             (try? FileManager.default.contentsOfDirectory(at: month, includingPropertiesForKeys: nil)) ?? []
-        }.first { $0.lastPathComponent == "\(document.items[0].id.uuidString.lowercased()).md" }!
+        }.first { $0.lastPathComponent == "\(document.items[0].id.uuidString.lowercased()).cue.md" }!
         check(FileManager.default.fileExists(atPath: itemURL.path), "package writes one Markdown document per item")
         check(FileManager.default.fileExists(atPath: url.appendingPathComponent("assets/sha256").path), "package reserves content-addressed assets")
         let readableItem = try String(contentsOf: itemURL, encoding: .utf8)
@@ -917,7 +1019,7 @@ private func checkStorage() {
             (try? FileManager.default.contentsOfDirectory(at: year, includingPropertiesForKeys: nil)) ?? []
         }.flatMap { month in
             (try? FileManager.default.contentsOfDirectory(at: month, includingPropertiesForKeys: nil)) ?? []
-        }.first { $0.lastPathComponent == "\(removedID.uuidString.lowercased()).md" }!
+        }.first { $0.lastPathComponent == "\(removedID.uuidString.lowercased()).cue.md" }!
         try searchIndexStore.rebuild(for: backupDocument)
         check(FileManager.default.fileExists(atPath: searchIndexStore.url(for: backupDocument.id).path), "search cache is rebuildable from package truth")
 
@@ -1226,18 +1328,510 @@ private func checkPanelSettings() {
     }
 }
 
-checkModifierTapDetector()
-checkSelectionModel()
-checkMarkdown()
-checkItemRecordCodec()
-checkPackagePlan()
-checkStorage()
-checkDuplicatePolicy()
-checkPanelPresentation()
-checkPanelTrackingPolicy()
-checkPanelGeometry()
-checkPanelEngagementPolicy()
-checkPanelSettings()
+private enum TransactionFixtureError: Error { case injected }
 
-print("\nCue core checks: \(passed) passed, \(failed) failed")
-if failed > 0 { exit(1) }
+private final class ReplaceThenThrowFileManager: FileManager, @unchecked Sendable {
+    override func replaceItemAt(
+        _ originalItemURL: URL,
+        withItemAt newItemURL: URL,
+        backupItemName: String? = nil,
+        options: FileManager.ItemReplacementOptions = []
+    ) throws -> URL? {
+        _ = try super.replaceItemAt(
+            originalItemURL,
+            withItemAt: newItemURL,
+            backupItemName: backupItemName,
+            options: options
+        )
+        let displacedURL = backupItemName.map {
+            originalItemURL.deletingLastPathComponent().appendingPathComponent($0, isDirectory: true)
+        }
+        throw NSError(
+            domain: "CueCoreChecks.ReplaceThenThrow",
+            code: 1,
+            userInfo: displacedURL.map { ["NSFileOriginalItemLocationKey": $0] } ?? [:]
+        )
+    }
+}
+
+private struct TransactionChild {
+    var process: Process
+    var input: Pipe
+    var output: Pipe
+    var error: Pipe
+}
+
+private func siblingPackages(
+    of package: URL,
+    containing token: String
+) throws -> [URL] {
+    try FileManager.default.contentsOfDirectory(
+        at: package.deletingLastPathComponent(),
+        includingPropertiesForKeys: nil
+    ).filter { $0.lastPathComponent.contains(token) }
+}
+
+private func archivedBackups(of package: URL) throws -> [URL] {
+    let directory = package.deletingLastPathComponent().appendingPathComponent(".cue-backups")
+    guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+    return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "cue" }
+}
+
+private func transactionChildIfRequested() -> Bool {
+    let arguments = CommandLine.arguments
+    guard arguments.dropFirst().first == "--transaction-child" else { return false }
+    guard arguments.count == 6 else { exit(64) }
+    let failpoint: WorkspaceTransactionFailpoint?
+    if arguments[5] == "none" {
+        failpoint = nil
+    } else if let value = WorkspaceTransactionFailpoint(rawValue: arguments[5]) {
+        failpoint = value
+    } else {
+        exit(64)
+    }
+    let package = URL(fileURLWithPath: arguments[2])
+    let title = arguments[3]
+    let expectedRevision = arguments[4]
+    do {
+        let store = WorkspaceStore { phase, _ in
+            if phase == failpoint { abort() }
+        }
+        let snapshot = try store.loadSnapshot(from: package)
+        guard snapshot.revision.rawValue == expectedRevision, var draft = snapshot.document else {
+            exit(72)
+        }
+        FileHandle.standardOutput.write(Data("READY \(snapshot.revision.rawValue)\n".utf8))
+        guard FileHandle.standardInput.readData(ofLength: 1) == Data([0x47]) else { exit(71) }
+        draft.title = title
+        _ = try store.commit(document: draft, basedOn: snapshot)
+        FileHandle.standardOutput.write(Data("SUCCESS\n".utf8))
+        exit(0)
+    } catch WorkspaceStoreError.externalModification {
+        FileHandle.standardOutput.write(Data("CONFLICT\n".utf8))
+        exit(73)
+    } catch {
+        FileHandle.standardError.write(Data("ERROR \(error)\n".utf8))
+        exit(74)
+    }
+}
+
+private func launchTransactionChild(
+    package: URL,
+    title: String,
+    revision: CuePackageRevision,
+    failpoint: WorkspaceTransactionFailpoint?
+) throws -> TransactionChild {
+    let input = Pipe()
+    let output = Pipe()
+    let error = Pipe()
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0])
+    process.arguments = [
+        "--transaction-child",
+        package.path,
+        title,
+        revision.rawValue,
+        failpoint?.rawValue ?? "none",
+    ]
+    process.standardInput = input
+    process.standardOutput = output
+    process.standardError = error
+    try process.run()
+    return TransactionChild(process: process, input: input, output: output, error: error)
+}
+
+private func release(_ child: TransactionChild) {
+    child.input.fileHandleForWriting.write(Data([0x47]))
+    try? child.input.fileHandleForWriting.close()
+}
+
+private func readyRevision(_ child: TransactionChild) -> String {
+    var data = Data()
+    while true {
+        let byte = child.output.fileHandleForReading.readData(ofLength: 1)
+        guard !byte.isEmpty else { return "" }
+        data.append(byte)
+        if byte.last == 0x0A { break }
+    }
+    let line = String(data: data, encoding: .utf8) ?? ""
+    guard line.hasPrefix("READY ") else { return "" }
+    return line.dropFirst("READY ".count).trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func checkWorkspaceTransaction() {
+    let fileManager = FileManager.default
+
+    do {
+        let root = fileManager.temporaryDirectory.appendingPathComponent("CueSchema2Commit-\(UUID())")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: root) }
+        let package = root.appendingPathComponent("legacy.cue")
+        var legacy = sampleDocument()
+        legacy.items[0].body = "decomposed e\u{0301}\nexact body"
+        legacy.items[0].contentHash = ContentHasher.hash(legacy.items[0].body)
+        try writeSchema2Package(legacy, to: package)
+        let beforeRevision = try CuePackagePlanner.inspect(atCoordinatedAccessorURL: package).packageRevision
+        let beforeSiblings = try fileManager.contentsOfDirectory(atPath: root.path).sorted()
+        let store = WorkspaceStore()
+        let snapshot = try store.loadSnapshot(from: package)
+        check(snapshot.writeCapability == .requiresVerifiedSchema2Migration, "coordinated schema-2 load exposes verified migration")
+        check(
+            try CuePackagePlanner.inspect(atCoordinatedAccessorURL: package).packageRevision == beforeRevision &&
+                fileManager.contentsOfDirectory(atPath: root.path).sorted() == beforeSiblings,
+            "coordinated schema-2 open is observational"
+        )
+        var draft = snapshot.document!
+        draft.title = "Migrated once"
+        let failingStore = WorkspaceStore { phase, _ in
+            if phase == .afterStageValidated { throw TransactionFixtureError.injected }
+        }
+        do {
+            _ = try failingStore.commit(document: draft, basedOn: snapshot)
+            check(false, "failed schema-2 migration stops before publication")
+        } catch TransactionFixtureError.injected {
+            check(true, "failed schema-2 migration stops before publication")
+        }
+        check(
+            try CuePackagePlanner.inspect(atCoordinatedAccessorURL: package).packageRevision == beforeRevision &&
+                fileManager.contentsOfDirectory(atPath: root.path).sorted() == beforeSiblings,
+            "failed schema-2 migration preserves recursive old bytes, paths, types, and siblings"
+        )
+        let receipt = try store.commit(document: draft, basedOn: snapshot)
+        check(receipt.snapshot.writeCapability == .writableSchema3, "first verified write migrates schema 2 to schema 3")
+        check(
+            try CuePackagePlanner.inspect(atCoordinatedAccessorURL: receipt.retainedBackupURL!).packageRevision == beforeRevision,
+            "schema-2 migration retains the exact old package revision"
+        )
+
+        let secondSnapshot = receipt.snapshot
+        var exactDraft = secondSnapshot.document!
+        exactDraft.items[0].body = "composed é\nexact body"
+        exactDraft.items[0].contentHash = ContentHasher.hash(exactDraft.items[0].body)
+        let exactReceipt = try store.commit(document: exactDraft, basedOn: secondSnapshot)
+        let exactRecord = exactReceipt.snapshot.itemRecords.first { $0.record.item.id == exactDraft.items[0].id }!
+        check(
+            exactRecord.data.suffix(Data(exactDraft.items[0].body.utf8).count) == Data(exactDraft.items[0].body.utf8),
+            "transaction writes the exact requested canonically-equivalent body bytes"
+        )
+        do {
+            _ = try store.commit(document: secondSnapshot.document!, basedOn: secondSnapshot)
+            check(false, "stale snapshot loses the final coordinated CAS")
+        } catch WorkspaceStoreError.externalModification {
+            check(true, "stale snapshot loses the final coordinated CAS")
+        }
+
+        let deleteSnapshot = exactReceipt.snapshot
+        let observed = deleteSnapshot.itemRecords[0].revision
+        var deletedDraft = deleteSnapshot.document!
+        let deletedID = deletedDraft.items.removeFirst().id
+        let deleteReceipt = try store.commit(document: deletedDraft, basedOn: deleteSnapshot)
+        check(
+            deleteReceipt.snapshot.tombstones.contains {
+                $0.itemID == deletedID && $0.binding == .observed(recordRevision: observed)
+            },
+            "transaction deletion binds the exact observed record revision"
+        )
+    } catch {
+        failed += 1
+        print("FAIL  schema-2 transaction closure: \(error)")
+    }
+
+    for phase in [
+        WorkspaceTransactionFailpoint.afterStageSynchronized,
+        .afterStageValidated,
+        .afterRevisionConfirmed,
+    ] {
+        do {
+            let root = fileManager.temporaryDirectory.appendingPathComponent("CueThrow-\(phase.rawValue)-\(UUID())")
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+            defer { try? fileManager.removeItem(at: root) }
+            let package = root.appendingPathComponent("workspace.cue")
+            let baseStore = WorkspaceStore()
+            let created = try baseStore.createSnapshot(document: sampleDocument(), at: package)
+            let store = WorkspaceStore { current, _ in if current == phase { throw TransactionFixtureError.injected } }
+            var draft = created.snapshot.document!
+            draft.title = phase.rawValue
+            do {
+                _ = try store.commit(document: draft, basedOn: created.snapshot)
+                check(false, "\(phase.rawValue) ordinary failure stops publication")
+            } catch TransactionFixtureError.injected {
+                check(true, "\(phase.rawValue) ordinary failure stops publication")
+            }
+            check(try baseStore.loadSnapshot(from: package).revision == created.snapshot.revision, "\(phase.rawValue) leaves exact old live")
+            check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "\(phase.rawValue) cleans only its stage")
+            check(try archivedBackups(of: package).isEmpty, "\(phase.rawValue) creates no backup")
+        } catch {
+            failed += 1
+            print("FAIL  \(phase.rawValue) ordinary fixture: \(error)")
+        }
+    }
+
+    for phase in [
+        WorkspaceTransactionFailpoint.afterReplacement,
+        .afterPublishedValidation,
+    ] {
+        do {
+            let root = fileManager.temporaryDirectory.appendingPathComponent("CueThrow-\(phase.rawValue)-\(UUID())")
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+            defer { try? fileManager.removeItem(at: root) }
+            let package = root.appendingPathComponent("workspace.cue")
+            let baseStore = WorkspaceStore()
+            let created = try baseStore.createSnapshot(document: sampleDocument(), at: package)
+            let store = WorkspaceStore { current, _ in if current == phase { throw TransactionFixtureError.injected } }
+            var draft = created.snapshot.document!
+            draft.title = phase.rawValue
+            var recovery: WorkspacePublicationRecovery?
+            do {
+                _ = try store.commit(document: draft, basedOn: created.snapshot)
+                check(false, "\(phase.rawValue) ordinary post-publication failure requires recovery")
+            } catch let WorkspaceStoreError.publicationRecoveryRequired(evidence) {
+                recovery = evidence
+                check(true, "\(phase.rawValue) ordinary post-publication failure requires recovery")
+            } catch {
+                check(false, "\(phase.rawValue) ordinary post-publication failure is typed (unexpected error: \(error))")
+            }
+            let live = try baseStore.loadSnapshot(from: package)
+            check(
+                live.document?.title == phase.rawValue && live.revision == recovery?.targetRevision,
+                "\(phase.rawValue) ordinary failure preserves exact new live"
+            )
+            check(
+                recovery?.sourceRevision == created.snapshot.revision &&
+                    recovery?.candidates.contains(where: {
+                        $0.url.standardizedFileURL == package.standardizedFileURL && $0.state == .target
+                    }) == true,
+                "\(phase.rawValue) recovery identifies exact source and live target"
+            )
+            check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "\(phase.rawValue) consumes the stage without rollback")
+            let adjacent = try siblingPackages(of: package, containing: ".cue-prior-")
+            let archived = try archivedBackups(of: package)
+            let backups = phase == .afterReplacement ? adjacent : archived
+            check(
+                try backups.count == 1 &&
+                    CuePackagePlanner.inspect(atCoordinatedAccessorURL: backups[0]).packageRevision == created.snapshot.revision,
+                "\(phase.rawValue) ordinary failure preserves exact old backup"
+            )
+            check(
+                recovery?.candidates.contains(where: { $0.state == .source }) == true,
+                "\(phase.rawValue) recovery exposes the exact old package"
+            )
+            check(
+                phase == .afterReplacement ? archived.isEmpty : adjacent.isEmpty,
+                "\(phase.rawValue) leaves the backup at its owned publication phase"
+            )
+        } catch {
+            failed += 1
+            print("FAIL  \(phase.rawValue) ordinary recovery fixture: \(error)")
+        }
+    }
+
+    do {
+        let root = fileManager.temporaryDirectory.appendingPathComponent("CueReplaceThenThrow-\(UUID())")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: root) }
+        let package = root.appendingPathComponent("workspace.cue")
+        let baseStore = WorkspaceStore()
+        let created = try baseStore.createSnapshot(document: sampleDocument(), at: package)
+        var draft = created.snapshot.document!
+        draft.title = "replacement completed before error"
+        let store = WorkspaceStore(fileManager: ReplaceThenThrowFileManager())
+        var recovery: WorkspacePublicationRecovery?
+        do {
+            _ = try store.commit(document: draft, basedOn: created.snapshot)
+            check(false, "replace-then-throw requires typed publication recovery")
+        } catch let WorkspaceStoreError.publicationRecoveryRequired(evidence) {
+            recovery = evidence
+            check(true, "replace-then-throw requires typed publication recovery")
+        } catch {
+            check(false, "replace-then-throw is typed (unexpected error: \(error))")
+        }
+        let live = try baseStore.loadSnapshot(from: package)
+        let backups = try siblingPackages(of: package, containing: ".cue-prior-")
+        check(
+            live.document?.title == draft.title && live.revision == recovery?.targetRevision,
+            "replace-then-throw preserves exact new live"
+        )
+        check(
+            try backups.count == 1 &&
+                CuePackagePlanner.inspect(atCoordinatedAccessorURL: backups[0]).packageRevision == created.snapshot.revision,
+            "replace-then-throw preserves exact displaced old package"
+        )
+        check(
+            recovery?.sourceRevision == created.snapshot.revision &&
+                recovery?.candidates.contains(where: { $0.state == .target }) == true &&
+                recovery?.candidates.contains(where: { $0.state == .source }) == true,
+            "replace-then-throw reports exact ambiguous replacement evidence"
+        )
+        check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "replace-then-throw never rolls live back through the consumed stage")
+    } catch {
+        failed += 1
+        print("FAIL  replace-then-throw fixture: \(error)")
+    }
+
+    do {
+        let root = fileManager.temporaryDirectory.appendingPathComponent("CuePreStageRejection-\(UUID())")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: root) }
+        let store = WorkspaceStore()
+
+        let readOnlyPackage = root.appendingPathComponent("read-only.cue")
+        _ = try store.createSnapshot(document: sampleDocument(), at: readOnlyPackage)
+        try rewriteManifest(at: readOnlyPackage) { $0["cue_schema"] = 4 }
+        let readOnlySnapshot = try store.loadSnapshot(from: readOnlyPackage)
+        let readOnlyRevision = readOnlySnapshot.revision
+        let beforeReadOnlySiblings = try fileManager.contentsOfDirectory(atPath: root.path).sorted()
+        do {
+            _ = try store.commit(document: sampleDocument(), basedOn: readOnlySnapshot)
+            check(false, "read-only snapshot rejects commit before staging")
+        } catch WorkspaceStoreError.readOnly(.newerSchema(4)) {
+            check(true, "read-only snapshot rejects commit before staging")
+        } catch {
+            check(false, "read-only rejection remains typed (unexpected error: \(error))")
+        }
+        check(
+            try CuePackagePlanner.inspect(atCoordinatedAccessorURL: readOnlyPackage).packageRevision == readOnlyRevision &&
+                fileManager.contentsOfDirectory(atPath: root.path).sorted() == beforeReadOnlySiblings,
+            "read-only rejection has zero package or sibling side effects"
+        )
+
+        let conflictPackage = root.appendingPathComponent("conflict.cue")
+        let created = try store.createSnapshot(document: sampleDocument(), at: conflictPackage)
+        let observed = created.snapshot.itemRecords[0]
+        var edited = observed.record
+        edited.item.body += "\nexternal edit"
+        edited.item.contentHash = ContentHasher.hash(edited.item.body)
+        try CueItemRecordCodec.encode(edited).write(
+            to: conflictPackage.appendingPathComponent(observed.path)
+        )
+        let tombstone = """
+        {"cue_schema":3,"cue_workspace_id":"\(edited.workspaceID.uuidString)","item_id":"\(edited.item.id.uuidString)","kind":"observed","observed_revision":"\(observed.revision.rawValue)"}
+        """
+        try Data(tombstone.utf8).write(to: tombstoneURLFor(conflictPackage, itemID: edited.item.id))
+        let conflictSnapshot = try store.loadSnapshot(from: conflictPackage)
+        check(conflictSnapshot.conflicts.count == 1, "divergent edit/delete snapshot exposes one conflict before commit")
+        let conflictRevision = conflictSnapshot.revision
+        let beforeConflictSiblings = try fileManager.contentsOfDirectory(atPath: root.path).sorted()
+        do {
+            _ = try store.commit(document: conflictSnapshot.document!, basedOn: conflictSnapshot)
+            check(false, "unresolved conflict rejects commit before staging")
+        } catch WorkspaceStoreError.invalidDocument("workspace has unresolved storage conflicts") {
+            check(true, "unresolved conflict rejects commit before staging")
+        } catch {
+            check(false, "unresolved conflict rejection remains typed (unexpected error: \(error))")
+        }
+        check(
+            try CuePackagePlanner.inspect(atCoordinatedAccessorURL: conflictPackage).packageRevision == conflictRevision &&
+                fileManager.contentsOfDirectory(atPath: root.path).sorted() == beforeConflictSiblings,
+            "unresolved conflict rejection has zero package or sibling side effects"
+        )
+    } catch {
+        failed += 1
+        print("FAIL  pre-stage rejection fixtures: \(error)")
+    }
+
+    do {
+        let root = fileManager.temporaryDirectory.appendingPathComponent("CueCorruptStage-\(UUID())")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: root) }
+        let package = root.appendingPathComponent("workspace.cue")
+        let base = WorkspaceStore()
+        let created = try base.createSnapshot(document: sampleDocument(), at: package)
+        let corrupting = WorkspaceStore { phase, context in
+            if phase == .afterStageSynchronized {
+                try Data("broken".utf8).write(to: context.stageURL.appendingPathComponent("manifest.yaml"))
+            }
+        }
+        do {
+            _ = try corrupting.commit(document: created.snapshot.document!, basedOn: created.snapshot)
+            check(false, "corrupt stage fails before publication")
+        } catch {
+            check(true, "corrupt stage fails before publication")
+        }
+        check(try base.loadSnapshot(from: package).revision == created.snapshot.revision, "corrupt stage leaves exact old live")
+        check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "corrupt stage is cleaned after validation failure")
+    } catch {
+        failed += 1
+        print("FAIL  corrupt stage fixture: \(error)")
+    }
+
+    for phase in WorkspaceTransactionFailpoint.allCases {
+        do {
+            let root = fileManager.temporaryDirectory.appendingPathComponent("CueAbort-\(phase.rawValue)-\(UUID())")
+            try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+            defer { try? fileManager.removeItem(at: root) }
+            let package = root.appendingPathComponent("workspace.cue")
+            let store = WorkspaceStore()
+            let created = try store.createSnapshot(document: sampleDocument(), at: package)
+            let child = try launchTransactionChild(
+                package: package,
+                title: "new-\(phase.rawValue)",
+                revision: created.snapshot.revision,
+                failpoint: phase
+            )
+            check(readyRevision(child) == created.snapshot.revision.rawValue, "\(phase.rawValue) child loads the exact base revision")
+            release(child)
+            child.process.waitUntilExit()
+            check(child.process.terminationReason == .uncaughtSignal, "\(phase.rawValue) child stops at the named process failpoint")
+            let live = try store.loadSnapshot(from: package)
+            if [.afterStageSynchronized, .afterStageValidated, .afterRevisionConfirmed].contains(phase) {
+                check(live.revision == created.snapshot.revision, "\(phase.rawValue) exposes complete old live")
+                let stages = try siblingPackages(of: package, containing: ".cue-stage-")
+                check(try stages.count == 1 && CuePackagePlanner.inspect(atCoordinatedAccessorURL: stages[0]).writeCapability == .writableSchema3, "\(phase.rawValue) retains one complete new stage")
+                check(try archivedBackups(of: package).isEmpty, "\(phase.rawValue) has no backup")
+            } else {
+                check(live.document?.title == "new-\(phase.rawValue)", "\(phase.rawValue) exposes complete new live")
+                check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "\(phase.rawValue) consumes the stage")
+                let backups = phase == .afterReplacement
+                    ? try siblingPackages(of: package, containing: ".cue-prior-")
+                    : try archivedBackups(of: package)
+                check(try backups.count == 1 && CuePackagePlanner.inspect(atCoordinatedAccessorURL: backups[0]).packageRevision == created.snapshot.revision, "\(phase.rawValue) retains exact old backup")
+            }
+        } catch {
+            failed += 1
+            print("FAIL  \(phase.rawValue) abort fixture: \(error)")
+        }
+    }
+
+    do {
+        let root = fileManager.temporaryDirectory.appendingPathComponent("CueRace-\(UUID())")
+        try fileManager.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: root) }
+        let package = root.appendingPathComponent("workspace.cue")
+        let store = WorkspaceStore()
+        let created = try store.createSnapshot(document: sampleDocument(), at: package)
+        let a = try launchTransactionChild(package: package, title: "writer-a", revision: created.snapshot.revision, failpoint: nil)
+        let b = try launchTransactionChild(package: package, title: "writer-b", revision: created.snapshot.revision, failpoint: nil)
+        check(readyRevision(a) == created.snapshot.revision.rawValue && readyRevision(b) == created.snapshot.revision.rawValue, "two writers load the same exact revision before release")
+        release(a)
+        release(b)
+        a.process.waitUntilExit()
+        b.process.waitUntilExit()
+        check([a.process.terminationStatus, b.process.terminationStatus].sorted() == [0, 73], "two same-revision writers produce exactly one winner")
+        check(["writer-a", "writer-b"].contains(try store.loadSnapshot(from: package).document?.title ?? ""), "dual-writer live package is one complete winner")
+        check(try siblingPackages(of: package, containing: ".cue-stage-").isEmpty, "dual-writer loser cleans its stage")
+        check(try archivedBackups(of: package).count == 1, "dual-writer publication retains exactly one old backup")
+    } catch {
+        failed += 1
+        print("FAIL  dual-writer fixture: \(error)")
+    }
+}
+
+if !transactionChildIfRequested() {
+    checkModifierTapDetector()
+    checkSelectionModel()
+    checkMarkdown()
+    checkItemRecordCodec()
+    checkPackagePlan()
+    checkStorage()
+    checkWorkspaceTransaction()
+    checkDuplicatePolicy()
+    checkPanelPresentation()
+    checkPanelTrackingPolicy()
+    checkPanelGeometry()
+    checkPanelEngagementPolicy()
+    checkPanelSettings()
+
+    print("\nCue core checks: \(passed) passed, \(failed) failed")
+    if failed > 0 { exit(1) }
+}
