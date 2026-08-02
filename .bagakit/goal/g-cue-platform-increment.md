@@ -2,7 +2,7 @@
 schema: bagakit.loop-goal.v1
 protocol_version: bagakit.goal.v.0.3
 goal_id: g-cue-platform-increment
-status: active
+status: paused
 truth_surface: .bagakit/goal/g-cue-platform-increment.md
 execution_owner:
   kind: bagakit-feature-tracker

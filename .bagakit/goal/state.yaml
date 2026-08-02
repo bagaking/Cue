@@ -1,6 +1,6 @@
 schema: bagakit.goal-state.v1
 protocol_version: bagakit.goal.v.0.3
-foreground_goal: g-cue-platform-increment
+foreground_goal: g-cue-edge-tab-affordance
 supervision:
   mode: self
   contract: .bagakit/goal/supervisor.md
@@ -8,13 +8,25 @@ supervision:
 goals:
   g-cue-platform-increment:
     file: .bagakit/goal/g-cue-platform-increment.md
-    status: active
-    role: foreground
+    status: paused
+    role: backlog
     execution_owner:
       kind: bagakit-feature-tracker
       ref: .bagakit/feature-tracker/features/f-222j2ekp8
     event_log: .bagakit/goal/events/g-cue-platform-increment.jsonl
+    reconciled_through: 2
+  g-cue-edge-tab-affordance:
+    file: .bagakit/goal/g-cue-edge-tab-affordance.md
+    status: active
+    role: foreground
+    execution_owner:
+      kind: bagakit-feature-tracker
+      ref: .bagakit/feature-tracker/features/f-225j2syhf
+    event_log: .bagakit/goal/events/g-cue-edge-tab-affordance.jsonl
     reconciled_through: 1
-edges: []
+edges:
+- from: g-cue-edge-tab-affordance
+  to: g-cue-platform-increment
+  kind: interrupts
 archive:
   dir: .bagakit/goal/archive

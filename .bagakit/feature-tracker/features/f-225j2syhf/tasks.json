@@ -1,0 +1,95 @@
+{
+  "version": 2,
+  "feat_id": "f-225j2syhf",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-225j2syhf/proposal.md",
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-225j2syhf/proposal.md",
+    "AGENTS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PRODUCT.md",
+    "docs/EXPERIMENTS.md",
+    "Sources/Cue/PanelRootView.swift",
+    "Sources/Cue/FloatingPanelController.swift",
+    "Sources/Cue/PanelPresentation.swift",
+    "Sources/Cue/PreviewRenderer.swift",
+    "Sources/Cue/IntegrationCheckRunner.swift",
+    "Resources/AppIcon.icns",
+    ".bagakit/feature-tracker/features-archived/f-223j2ezq3/artifacts/closeout-preserved-root/proposal.md"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-225j2syhf/proposal.md",
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-225j2syhf/proposal.md",
+        "AGENTS.md",
+        "docs/ARCHITECTURE.md",
+        "docs/PRODUCT.md",
+        "docs/EXPERIMENTS.md",
+        "Sources/Cue/PanelRootView.swift",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/PanelPresentation.swift",
+        "Sources/Cue/PreviewRenderer.swift",
+        "Sources/Cue/IntegrationCheckRunner.swift",
+        "Resources/AppIcon.icns",
+        ".bagakit/feature-tracker/features-archived/f-223j2ezq3/artifacts/closeout-preserved-root/proposal.md"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Correct the retained edge tab affordance",
+      "objective": "Replace the detached outlined rail treatment with one narrow branded edge-attached tongue and make the retained panel's shadow follow retracted versus expanded state, without changing the existing panel geometry or interaction lifecycle.",
+      "outcome": "Cue rests as a quiet recognizable tab emerging from the selected physical edge, remains reachable through the full 22×88 hit frame, and reveals exactly as before.",
+      "acceptance": [
+        "A 16–18 point visible tongue sits inside the unchanged 22×88 hit frame, flush and square on the edge-facing side with only the inward side continuously rounded.",
+        "The canonical Cue app icon remains visible at count zero, queue count is secondary, and the chevron, full outline and retracted AppKit shadow are absent.",
+        "One Button retains the existing VoiceOver label, value and hint plus the current hover, click, focus, Reduce Motion, state-machine, multi-display and frame-persistence semantics.",
+        "Left/light/count-zero, right/dark/count-two and opaque fallback renders prove the edge context, brand hierarchy, single contour and transparent inward hit remainder.",
+        "Expanded and transitional panel shadow remains on, independent design/accessibility and AppKit/runtime reviews have no blocking findings, and full deterministic checks pass."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The full deterministic suite preserves panel behavior and exercises the actual retained NSPanel owner."
+        },
+        {
+          "kind": "artifact",
+          "ref": "Sources/Cue/PreviewRenderer.swift",
+          "proves": "Static edge-context fixtures cover the required visual and fallback states."
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-225j2syhf/verification.md",
+          "proves": "Exact images and independent reviews map the final result to the design packet."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-225j2syhf/proposal.md",
+        "Sources/Cue/PanelRootView.swift",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/PanelPresentation.swift",
+        "Sources/Cue/PreviewRenderer.swift",
+        "Sources/Cue/IntegrationCheckRunner.swift",
+        "Resources/AppIcon.icns"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "last_commit_hash": null,
+      "notes": []
+    }
+  ]
+}

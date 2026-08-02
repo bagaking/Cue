@@ -1,0 +1,19 @@
+{
+  "schema": "bagakit.execution-owner-receipt.v1",
+  "owner_kind": "feature_tracker",
+  "owner_id": "f-225j2syhf",
+  "semantic_revision": "0e4949083c1c9a88cd48ccdc1a2111b97b8277249895c109ef2483d8cb39189a",
+  "lifecycle_status": "in_progress",
+  "continuation": "continue",
+  "current_item_id": "T-001",
+  "blocker": null,
+  "replacement_ref": null,
+  "evidence_refs": [
+    ".bagakit/feature-tracker/features/f-225j2syhf/state.json",
+    ".bagakit/feature-tracker/features/f-225j2syhf/tasks.json"
+  ],
+  "evidence_hashes": {
+    ".bagakit/feature-tracker/features/f-225j2syhf/state.json": "b3028b5914429ab3558c76219940e0553267121a434cf16a4e23119a45140914",
+    ".bagakit/feature-tracker/features/f-225j2syhf/tasks.json": "e13c41b7120c779ab5ce2ab7197acb586f3065c7f230612ace5aee00ee34f3ea"
+  }
+}
