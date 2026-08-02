@@ -4,13 +4,13 @@
   "title": "Cue Edge Tab Affordance",
   "slug": "cue-edge-tab-affordance",
   "goal": "Make the retained Cue edge rail read as a quiet branded tab emerging from the selected screen edge while preserving its full hit target and interaction lifecycle.",
-  "status": "in_progress",
+  "status": "discarded",
   "workspace_mode": "worktree",
   "base_ref": "main",
   "branch": "featf-225j2syhf",
   "worktree_name": "wt-f-225j2syhf",
   "worktree_path": ".worktrees/wt-f-225j2syhf",
-  "current_task_id": "T-001",
+  "current_task_id": null,
   "runtime_role": "standalone",
   "blocked_reason_class": "none",
   "runtime_relations": [],
@@ -41,6 +41,34 @@
     {
       "action": "task_started",
       "detail": "T-001"
+    },
+    {
+      "action": "task_finished",
+      "detail": "T-001 => blocked"
+    },
+    {
+      "action": "feat_discarded",
+      "detail": "reason=superseded; replacement=f-226j2d2fx"
     }
-  ]
+  ],
+  "closed_from_status": "blocked",
+  "discard_reason": "superseded",
+  "replacement_feat_id": "f-226j2d2fx",
+  "discarded_cleanup": {
+    "workspace_mode": "worktree",
+    "base_ref": "main",
+    "branch_merged": true,
+    "worktree_removed": true,
+    "worktree_pruned": true,
+    "branch_deleted": true,
+    "worktree_patch": "",
+    "worktree_staged_patch": "",
+    "branch_patch": "",
+    "untracked_archive": "",
+    "preserved_root_entries": [
+      "artifacts/closeout-preserved-root/proposal.md",
+      "artifacts/closeout-preserved-root/verification.md"
+    ],
+    "note": "discard closes stale/superseded work while preserving feat artifacts; worktree mode force-removes worktree and deletes branch after exporting patches when available"
+  }
 }

@@ -3,7 +3,7 @@
   "generated_by": "bagakit-feature-tracker",
   "feature_id_issuance": {
     "scheme": "feature-tracker-id-v1-c3n2g4",
-    "next_cursor": 4
+    "next_cursor": 5
   },
   "features": [
     {
@@ -42,10 +42,21 @@
     {
       "feat_id": "f-225j2syhf",
       "title": "Cue Edge Tab Affordance",
-      "status": "in_progress",
+      "status": "discarded",
       "workspace_mode": "worktree",
       "branch": "featf-225j2syhf",
       "worktree_name": "wt-f-225j2syhf",
+      "runtime_role": "standalone",
+      "blocked_reason_class": "none",
+      "runtime_relations": []
+    },
+    {
+      "feat_id": "f-226j2d2fx",
+      "title": "Cue Edge Tab and Intentional Links",
+      "status": "in_progress",
+      "workspace_mode": "current_tree",
+      "branch": "",
+      "worktree_name": "",
       "runtime_role": "standalone",
       "blocked_reason_class": "none",
       "runtime_relations": []

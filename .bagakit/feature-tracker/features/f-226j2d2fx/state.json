@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "feat_id": "f-226j2d2fx",
+  "title": "Cue Edge Tab and Intentional Links",
+  "slug": "cue-edge-tab-intentional-links",
+  "goal": "Make Cue rest as a quiet branded edge-attached tab and open note-body web links only through explicit Command-click, while preserving panel reachability and ordinary card interaction.",
+  "status": "in_progress",
+  "workspace_mode": "current_tree",
+  "base_ref": "main",
+  "branch": "",
+  "worktree_name": "",
+  "worktree_path": "",
+  "current_task_id": "T-001",
+  "runtime_role": "standalone",
+  "blocked_reason_class": "none",
+  "runtime_relations": [],
+  "counters": {
+    "gate_fail_streak": 0,
+    "no_progress_rounds": 0,
+    "round_count": 0
+  },
+  "gate": {
+    "last_result": null,
+    "last_task_id": null,
+    "last_check_commands": [],
+    "last_log_path": null
+  },
+  "history": [
+    {
+      "action": "feat_created",
+      "detail": "workspace_mode=proposal_only; base_ref=main; root_branch=main"
+    },
+    {
+      "action": "task_plan_set",
+      "detail": "revision=1; supersedes_revision=none"
+    },
+    {
+      "action": "workspace_assigned",
+      "detail": "proposal_only -> current_tree; root_branch=main"
+    },
+    {
+      "action": "task_started",
+      "detail": "T-001"
+    }
+  ]
+}

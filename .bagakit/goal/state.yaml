@@ -21,9 +21,9 @@ goals:
     role: foreground
     execution_owner:
       kind: bagakit-feature-tracker
-      ref: .bagakit/feature-tracker/features/f-225j2syhf
+      ref: .bagakit/feature-tracker/features/f-226j2d2fx
     event_log: .bagakit/goal/events/g-cue-edge-tab-affordance.jsonl
-    reconciled_through: 1
+    reconciled_through: 2
 edges:
 - from: g-cue-edge-tab-affordance
   to: g-cue-platform-increment

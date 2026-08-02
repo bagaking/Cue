@@ -1,0 +1,91 @@
+{
+  "version": 2,
+  "feat_id": "f-226j2d2fx",
+  "plan_status": "reviewed",
+  "plan_revision": 1,
+  "supersedes_revision": null,
+  "review_ref": ".bagakit/feature-tracker/features/f-226j2d2fx/proposal.md",
+  "source_refs": [
+    ".bagakit/feature-tracker/features/f-226j2d2fx/proposal.md",
+    "AGENTS.md",
+    "docs/ARCHITECTURE.md",
+    "docs/PRODUCT.md",
+    "Sources/Cue/PanelRootView.swift",
+    "Sources/Cue/FloatingPanelController.swift",
+    "Sources/Cue/WorkItemCard.swift",
+    "Sources/Cue/PreviewRenderer.swift",
+    "Sources/Cue/IntegrationCheckRunner.swift",
+    "Resources/AppIcon.icns"
+  ],
+  "plan_history": [
+    {
+      "revision": 1,
+      "supersedes_revision": null,
+      "review_ref": ".bagakit/feature-tracker/features/f-226j2d2fx/proposal.md",
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-226j2d2fx/proposal.md",
+        "AGENTS.md",
+        "docs/ARCHITECTURE.md",
+        "docs/PRODUCT.md",
+        "Sources/Cue/PanelRootView.swift",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/WorkItemCard.swift",
+        "Sources/Cue/PreviewRenderer.swift",
+        "Sources/Cue/IntegrationCheckRunner.swift",
+        "Resources/AppIcon.icns"
+      ],
+      "task_ids": [
+        "T-001"
+      ],
+      "superseded_task_ids": []
+    }
+  ],
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Correct the edge tab and make note links intentional",
+      "objective": "Replace the detached rail treatment with one branded physical-edge tongue and allow the existing inline Markdown note links to open only through safe Command-click, while preserving panel and card interaction owners.",
+      "outcome": "Cue rests as a recognizable low-obstruction tab, and users can intentionally open web references without accidental navigation or lost card selection/edit semantics.",
+      "acceptance": [
+        "One 18×88 tongue sits inside the unchanged 22×88 hit frame, flat at the physical screen edge and rounded only inward, with canonical Cue icon, secondary count, no chevron/full outline and no settled retracted shadow.",
+        "One Reveal Cue Button retains current accessibility and the panel state machine, timings, geometry, focus, Pin, multi-display and Reduce Motion contracts remain unchanged.",
+        "Left/light/count-zero, right/dark/count-two and opaque edge-context renders prove attachment, single contour, brand and transparent inward hit remainder.",
+        "The existing inline Markdown renderer opens bare, angle-bracketed and labeled http/https links only with Command held; case-normalized schemes are allowed and file/custom/javascript schemes fail closed.",
+        "Ordinary click retains card selection/edit semantics, Command+click does not also invoke card gestures, accessibility surfaces do not duplicate, and independent reviews plus deterministic checks pass."
+      ],
+      "verification": [
+        {
+          "kind": "command",
+          "ref": "scripts/check.sh",
+          "proves": "The full deterministic suite preserves public panel, card and storage behavior."
+        },
+        {
+          "kind": "artifact",
+          "ref": "Sources/Cue/PreviewRenderer.swift",
+          "proves": "Actual PanelRootView fixtures cover required physical-edge visual states."
+        },
+        {
+          "kind": "artifact",
+          "ref": ".bagakit/feature-tracker/features/f-226j2d2fx/verification.md",
+          "proves": "Exact images, policy cases and independent review map to the combined acceptance."
+        }
+      ],
+      "source_refs": [
+        ".bagakit/feature-tracker/features/f-226j2d2fx/proposal.md",
+        "Sources/Cue/PanelRootView.swift",
+        "Sources/Cue/FloatingPanelController.swift",
+        "Sources/Cue/WorkItemCard.swift",
+        "Sources/Cue/PreviewRenderer.swift",
+        "Sources/Cue/IntegrationCheckRunner.swift",
+        "Resources/AppIcon.icns"
+      ],
+      "supersedes": [],
+      "introduced_in_revision": 1,
+      "status": "in_progress",
+      "gate_result": null,
+      "last_gate_commands": [],
+      "last_commit_hash": null,
+      "notes": []
+    }
+  ]
+}
